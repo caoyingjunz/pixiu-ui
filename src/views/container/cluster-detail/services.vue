@@ -1,0 +1,535 @@
+<template>
+  <div class="services-page">
+    <ElCard class="art-table-card">
+      <ElTabs v-model="kind">
+        <!-- ── Service Tab ── -->
+        <ElTabPane label="Service" name="svc">
+          <ArtTableHeader
+            v-model:columns="svcColumnChecks"
+            :loading="svcLoading"
+            layout="size,fullscreen,columns,settings"
+            style="margin-top: 15px"
+            @refresh="onSvcRefresh"
+          >
+            <template #left>
+              <div class="workloads-toolbar">
+                <ElButton v-ripple @click="ElMessage.warning('暂不支持，功能开发中')">新建</ElButton>
+                <div class="workloads-toolbar__filters">
+                  <ElInput
+                    v-model="svcSearchForm.name"
+                    clearable
+                    placeholder="请输入名称"
+                    class="workloads-toolbar__search"
+                    @keyup.enter="runSvcSearch"
+                    @clear="runSvcSearch"
+                  />
+                  <div
+                    class="workloads-toolbar-search-btn"
+                    role="button"
+                    tabindex="0"
+                    title="搜索"
+                    @click="forceSvcSearch"
+                    @keyup.enter="forceSvcSearch"
+                  >
+                    <ArtSvgIcon icon="ri:search-line" class="text-g-700" />
+                  </div>
+                </div>
+              </div>
+            </template>
+          </ArtTableHeader>
+
+          <ArtTable
+            row-key="rowKey"
+            :loading="svcLoading"
+            :data="svcData"
+            :columns="svcVisibleColumns"
+            :pagination="svcPagination"
+            :pagination-options="{ align: 'right' }"
+            @pagination:size-change="svcHandleSizeChange"
+            @pagination:current-change="svcHandleCurrentChange"
+            @sort-change="onSvcSortChange"
+          />
+        </ElTabPane>
+
+        <!-- ── Ingress Tab ── -->
+        <ElTabPane label="Ingress" name="ing">
+          <ArtTableHeader
+            v-model:columns="ingColumnChecks"
+            :loading="ingLoading"
+            layout="size,fullscreen,columns,settings"
+            style="margin-top: 15px"
+            @refresh="onIngRefresh"
+          >
+            <template #left>
+              <div class="workloads-toolbar">
+                <ElButton v-ripple @click="ElMessage.warning('暂不支持，功能开发中')">新建</ElButton>
+                <div class="workloads-toolbar__filters">
+                  <ElInput
+                    v-model="ingSearchForm.name"
+                    clearable
+                    placeholder="请输入名称"
+                    class="workloads-toolbar__search"
+                    @keyup.enter="runIngSearch"
+                    @clear="runIngSearch"
+                  />
+                  <div
+                    class="workloads-toolbar-search-btn"
+                    role="button"
+                    tabindex="0"
+                    title="搜索"
+                    @click="forceIngSearch"
+                    @keyup.enter="forceIngSearch"
+                  >
+                    <ArtSvgIcon icon="ri:search-line" class="text-g-700" />
+                  </div>
+                </div>
+              </div>
+            </template>
+          </ArtTableHeader>
+
+          <ArtTable
+            row-key="rowKey"
+            :loading="ingLoading"
+            :data="ingData"
+            :columns="ingVisibleColumns"
+            :pagination="ingPagination"
+            :pagination-options="{ align: 'right' }"
+            @pagination:size-change="ingHandleSizeChange"
+            @pagination:current-change="ingHandleCurrentChange"
+            @sort-change="onIngSortChange"
+          />
+        </ElTabPane>
+      </ElTabs>
+    </ElCard>
+
+    <!-- YAML readonly dialog (shared) -->
+    <ElDialog v-model="yamlVisible" title="查看 YAML" width="720px" destroy-on-close>
+      <ElInput v-model="yamlText" type="textarea" :rows="22" readonly class="deploy-yaml-textarea" />
+      <template #footer>
+        <ElButton type="primary" @click="yamlVisible = false">关闭</ElButton>
+      </template>
+    </ElDialog>
+  </div>
+</template>
+
+<script setup lang="ts">
+  import {
+    ElButton,
+    ElCard,
+    ElDialog,
+    ElInput,
+    ElLink,
+    ElMessage,
+    ElMessageBox,
+    ElTag,
+    ElTabs,
+    ElTabPane
+  } from 'element-plus'
+  import { CopyDocument } from '@element-plus/icons-vue'
+  import yaml from 'js-yaml'
+  import { computed, h, inject, ref, watch } from 'vue'
+  import { useRoute } from 'vue-router'
+  import { useTable } from '@/hooks/core/useTable'
+  import {
+    fetchK8sServiceList,
+    fetchK8sService,
+    deleteK8sService,
+    type K8sService
+  } from '@/api/kubernetes/service'
+  import {
+    fetchK8sIngressList,
+    fetchK8sIngress,
+    deleteK8sIngress,
+    type K8sIngress
+  } from '@/api/kubernetes/ingress'
+  import { formatNodeCreationTime } from '@/utils/kubernetes/nodeDisplay'
+  import { clusterDetailNamespaceKey } from './context'
+
+  defineOptions({ name: 'ClusterDetailServices' })
+
+  const route = useRoute()
+  const kind = ref('svc')
+
+  // ── Service tab state ──
+  const svcSearchForm = ref<{ name?: string }>({})
+  const svcSortOrder = ref<'ascending' | 'descending' | null>(null)
+
+  // ── Ingress tab state ──
+  const ingSearchForm = ref<{ name?: string }>({})
+  const ingSortOrder = ref<'ascending' | 'descending' | null>(null)
+  const globalNs = inject(clusterDetailNamespaceKey)
+  const selectedNamespace = computed(() => globalNs?.namespace.value ?? '')
+
+  // ── YAML dialog ──
+  const yamlVisible = ref(false)
+  const yamlText = ref('')
+
+  // ── Shared helpers ──
+  function renderNsCell(ns: string) {
+    const isSystem = ns === 'default' || ns.startsWith('kube-')
+    return h('div', { style: 'display:flex;align-items:center;gap:6px' }, [
+      h('span', { style: 'font-size:12px' }, ns),
+      isSystem
+        ? h('span', {
+            style:
+              'font-size:11px;padding:0 4px;line-height:16px;border-radius:3px;background:var(--el-color-primary-light-9);color:var(--el-color-primary);border:1px solid var(--el-color-primary-light-7);flex-shrink:0'
+          }, '系统')
+        : null
+    ])
+  }
+
+  function renderNameCell(name: string) {
+    return h('div', { style: 'display:flex;align-items:center;gap:8px' }, [
+      h('span', { style: 'font-size:14px;color:var(--el-text-color-primary)' }, name),
+      h('span', {
+        class: 'icon-action',
+        style: 'cursor:pointer;color:var(--el-text-color-secondary);display:inline-flex;align-items:center',
+        title: '复制',
+        onClick: (e: MouseEvent) => {
+          e.stopPropagation()
+          navigator.clipboard.writeText(name)
+          ElMessage.success('已复制')
+        }
+      }, [h(CopyDocument, { style: 'width:12px;height:12px' })])
+    ])
+  }
+
+  function formatSvcPorts(ports: K8sService['spec']['ports']): string {
+    if (!ports?.length) return '—'
+    return ports.map(p => {
+      const proto = p.protocol ?? 'TCP'
+      if (p.nodePort) return `${p.port}:${p.nodePort}/${proto}`
+      return `${p.port}/${proto}`
+    }).join(', ')
+  }
+
+  function getSvcTypeTagColor(type?: string): string {
+    switch (type) {
+      case 'NodePort': return 'warning'
+      case 'LoadBalancer': return 'success'
+      case 'ExternalName': return 'info'
+      default: return 'info'
+    }
+  }
+
+  function getIngressHosts(ingress: K8sIngress): string {
+    const rules = ingress.spec?.rules
+    if (!rules?.length) return '—'
+    const hosts = rules.map(r => r.host).filter(Boolean)
+    return hosts.length ? hosts.join(', ') : '—'
+  }
+
+  // ── Service useTable ──
+  type SvcParams = { current: number; size: number; name?: string; namespace?: string }
+  const {
+    columns: svcColumns,
+    columnChecks: svcColumnChecks,
+    data: svcData,
+    loading: svcLoading,
+    pagination: svcPagination,
+    getData: getSvcData,
+    replaceSearchParams: replaceSvcSearchParams,
+    handleSizeChange: svcHandleSizeChange,
+    handleCurrentChange: svcHandleCurrentChange,
+    refreshData: refreshSvcData
+  } = useTable({
+    core: {
+      immediate: false,
+      apiFn: async (params: SvcParams) => {
+        const cluster = String(route.query.cluster ?? '')
+        if (!cluster) return { code: 200, data: { records: [] as (K8sService & { rowKey: string })[], total: 0, current: 1, size: params.size } }
+        const { items, total } = await fetchK8sServiceList(cluster, {
+          page: params.current, limit: params.size,
+          namespace: selectedNamespace.value || undefined,
+          name: (params.name ?? '').trim() || undefined
+        })
+        let list = items.map((d, i) => ({ ...d, rowKey: d.metadata?.uid ?? d.metadata?.name ?? `svc-${i}` }))
+        if (svcSortOrder.value) {
+          list = [...list].sort((a, b) => {
+            const ta = a.metadata?.creationTimestamp ?? '', tb = b.metadata?.creationTimestamp ?? ''
+            return svcSortOrder.value === 'ascending' ? ta.localeCompare(tb) : tb.localeCompare(ta)
+          })
+        }
+        return { code: 200, data: { records: list, total, current: params.current, size: params.size } }
+      },
+      apiParams: { current: 1, size: 10, name: undefined, namespace: undefined },
+      columnsFactory: () => [
+        { type: 'selection' },
+        {
+          prop: 'metadata.name', label: '名称', minWidth: 200,
+          formatter: (row: K8sService) => renderNameCell(row.metadata?.name ?? '—')
+        },
+        {
+          prop: 'metadata.namespace', label: '命名空间', width: 160,
+          formatter: (row: K8sService) => renderNsCell(row.metadata?.namespace ?? '—')
+        },
+        {
+          prop: 'spec.type', label: '类型', width: 130,
+          formatter: (row: K8sService) => {
+            const type = row.spec?.type ?? 'ClusterIP'
+            return h(ElTag, { type: getSvcTypeTagColor(type) as any, size: 'small' }, () => type)
+          }
+        },
+        {
+          prop: 'spec.clusterIP', label: 'Cluster IP', width: 150,
+          formatter: (row: K8sService) => h('span', { style: 'font-size:12px' }, row.spec?.clusterIP ?? '—')
+        },
+        {
+          prop: 'spec.ports', label: '端口', minWidth: 180,
+          formatter: (row: K8sService) => h('span', { style: 'font-size:12px' }, formatSvcPorts(row.spec?.ports))
+        },
+        {
+          prop: 'metadata.creationTimestamp', label: '创建时间', width: 168, sortable: 'custom',
+          formatter: (row: K8sService) => h('span', { style: 'font-size:12px' }, formatNodeCreationTime(row.metadata?.creationTimestamp))
+        },
+        {
+          prop: 'operation', label: '操作', width: 160, fixed: 'right',
+          formatter: (row: K8sService) =>
+            h('div', { style: 'display:flex;align-items:center;gap:12px' }, [
+              h(ElLink, { type: 'primary', underline: 'never', style: 'font-size:12px', onClick: () => void openYamlDialog('svc', row.metadata?.namespace ?? '', row.metadata?.name ?? '') }, () => '查看YAML'),
+              h(ElLink, { type: 'danger', underline: 'never', style: 'font-size:12px', onClick: () => void deleteResource('svc', row.metadata?.namespace ?? '', row.metadata?.name ?? '', onSvcRefresh) }, () => '删除')
+            ])
+        }
+      ]
+    }
+  })
+
+  const svcVisibleColumns = computed(() =>
+    svcColumns.value.filter(c => !(selectedNamespace.value && c.prop === 'metadata.namespace'))
+  )
+
+  function runSvcSearch() {
+    const name = (svcSearchForm.value.name ?? '').trim() || undefined
+    replaceSvcSearchParams({ name, namespace: selectedNamespace.value || undefined })
+    getSvcData()
+  }
+  function forceSvcSearch() {
+    const name = (svcSearchForm.value.name ?? '').trim() || undefined
+    replaceSvcSearchParams({ name, namespace: selectedNamespace.value || undefined })
+    getSvcData()
+  }
+  function onSvcRefresh() { refreshSvcData() }
+  function onSvcSortChange({ prop, order }: { prop: string; order: string | null }) {
+    if (prop === 'metadata.creationTimestamp') { svcSortOrder.value = (order as 'ascending' | 'descending' | null) ?? null; getSvcData() }
+  }
+
+  // ── Ingress useTable ──
+  type IngParams = { current: number; size: number; name?: string; namespace?: string }
+  const {
+    columns: ingColumns,
+    columnChecks: ingColumnChecks,
+    data: ingData,
+    loading: ingLoading,
+    pagination: ingPagination,
+    getData: getIngData,
+    replaceSearchParams: replaceIngSearchParams,
+    handleSizeChange: ingHandleSizeChange,
+    handleCurrentChange: ingHandleCurrentChange,
+    refreshData: refreshIngData
+  } = useTable({
+    core: {
+      immediate: false,
+      apiFn: async (params: IngParams) => {
+        const cluster = String(route.query.cluster ?? '')
+        if (!cluster) return { code: 200, data: { records: [] as (K8sIngress & { rowKey: string })[], total: 0, current: 1, size: params.size } }
+        const { items, total } = await fetchK8sIngressList(cluster, {
+          page: params.current, limit: params.size,
+          namespace: selectedNamespace.value || undefined,
+          name: (params.name ?? '').trim() || undefined
+        })
+        let list = items.map((d, i) => ({ ...d, rowKey: d.metadata?.uid ?? d.metadata?.name ?? `ing-${i}` }))
+        if (ingSortOrder.value) {
+          list = [...list].sort((a, b) => {
+            const ta = a.metadata?.creationTimestamp ?? '', tb = b.metadata?.creationTimestamp ?? ''
+            return ingSortOrder.value === 'ascending' ? ta.localeCompare(tb) : tb.localeCompare(ta)
+          })
+        }
+        return { code: 200, data: { records: list, total, current: params.current, size: params.size } }
+      },
+      apiParams: { current: 1, size: 10, name: undefined, namespace: undefined },
+      columnsFactory: () => [
+        { type: 'selection' },
+        {
+          prop: 'metadata.name', label: '名称', minWidth: 200,
+          formatter: (row: K8sIngress) => renderNameCell(row.metadata?.name ?? '—')
+        },
+        {
+          prop: 'metadata.namespace', label: '命名空间', width: 160,
+          formatter: (row: K8sIngress) => renderNsCell(row.metadata?.namespace ?? '—')
+        },
+        {
+          prop: 'spec.ingressClassName', label: 'IngressClass', width: 160,
+          formatter: (row: K8sIngress) => h('span', { style: 'font-size:12px' }, row.spec?.ingressClassName ?? '—')
+        },
+        {
+          prop: 'spec.rules', label: 'Hosts', minWidth: 220, showOverflowTooltip: true,
+          formatter: (row: K8sIngress) => h('span', { style: 'font-size:12px' }, getIngressHosts(row))
+        },
+        {
+          prop: 'metadata.creationTimestamp', label: '创建时间', width: 168, sortable: 'custom',
+          formatter: (row: K8sIngress) => h('span', { style: 'font-size:12px' }, formatNodeCreationTime(row.metadata?.creationTimestamp))
+        },
+        {
+          prop: 'operation', label: '操作', width: 160, fixed: 'right',
+          formatter: (row: K8sIngress) =>
+            h('div', { style: 'display:flex;align-items:center;gap:12px' }, [
+              h(ElLink, { type: 'primary', underline: 'never', style: 'font-size:12px', onClick: () => void openYamlDialog('ing', row.metadata?.namespace ?? '', row.metadata?.name ?? '') }, () => '查看YAML'),
+              h(ElLink, { type: 'danger', underline: 'never', style: 'font-size:12px', onClick: () => void deleteResource('ing', row.metadata?.namespace ?? '', row.metadata?.name ?? '', onIngRefresh) }, () => '删除')
+            ])
+        }
+      ]
+    }
+  })
+
+  const ingVisibleColumns = computed(() =>
+    ingColumns.value.filter(c => !(selectedNamespace.value && c.prop === 'metadata.namespace'))
+  )
+
+  function runIngSearch() {
+    const name = (ingSearchForm.value.name ?? '').trim() || undefined
+    replaceIngSearchParams({ name, namespace: selectedNamespace.value || undefined })
+    getIngData()
+  }
+  function forceIngSearch() {
+    const name = (ingSearchForm.value.name ?? '').trim() || undefined
+    replaceIngSearchParams({ name, namespace: selectedNamespace.value || undefined })
+    getIngData()
+  }
+  function onIngRefresh() { refreshIngData() }
+  function onIngSortChange({ prop, order }: { prop: string; order: string | null }) {
+    if (prop === 'metadata.creationTimestamp') { ingSortOrder.value = (order as 'ascending' | 'descending' | null) ?? null; getIngData() }
+  }
+
+  // ── Shared YAML dialog ──
+  async function openYamlDialog(resKind: 'svc' | 'ing', namespace: string, name: string) {
+    const cluster = String(route.query.cluster ?? '')
+    if (!cluster || !namespace || !name) return
+    try {
+      let resource: unknown
+      if (resKind === 'svc') resource = await fetchK8sService(cluster, namespace, name)
+      else resource = await fetchK8sIngress(cluster, namespace, name)
+      yamlText.value = yaml.dump(resource, { quotingType: '"' })
+      yamlVisible.value = true
+    } catch (e: unknown) {
+      ElMessage.error(e instanceof Error ? e.message : '加载失败')
+    }
+  }
+
+  // ── Shared delete ──
+  async function deleteResource(resKind: 'svc' | 'ing', namespace: string, name: string, refresh: () => void) {
+    const cluster = String(route.query.cluster ?? '')
+    if (!cluster || !namespace || !name) return
+    try {
+      await ElMessageBox.confirm(`确定删除 "${name}" 吗？`, '删除确认', {
+        type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消'
+      })
+      if (resKind === 'svc') await deleteK8sService(cluster, namespace, name)
+      else await deleteK8sIngress(cluster, namespace, name)
+      ElMessage.success('删除成功')
+      refresh()
+    } catch {
+      // user cancel
+    }
+  }
+
+  // ── Tab lazy loading ──
+  watch(kind, (val) => {
+    const cluster = String(route.query.cluster ?? '')
+    if (!cluster) return
+    if (val === 'svc') getSvcData()
+    else if (val === 'ing') getIngData()
+  })
+
+  watch(selectedNamespace, () => {
+    if (kind.value === 'svc') getSvcData()
+    if (kind.value === 'ing') getIngData()
+  })
+
+  // First tab loads immediately when cluster is available
+  watch(
+    () => String(route.query.cluster ?? ''),
+    (cluster) => {
+      if (cluster && kind.value === 'svc') getSvcData()
+    },
+    { immediate: true }
+  )
+</script>
+
+<style>
+  .services-page .icon-action {
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .services-page .el-table__row:hover .icon-action {
+    opacity: 1;
+  }
+  .services-page .art-table .el-table {
+    font-size: 13px;
+  }
+  .services-page .art-table .el-table th.el-table__cell {
+    font-size: 13px;
+  }
+</style>
+
+<style scoped>
+  .workloads-toolbar {
+    display: flex;
+    width: 100%;
+    min-width: 0;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .workloads-toolbar__filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-left: auto;
+    margin-right: 8px;
+  }
+
+  .workloads-toolbar__ns-select {
+    width: 160px;
+  }
+
+  .workloads-toolbar__ns-select :deep(.el-select__placeholder) {
+    color: var(--el-text-color-regular);
+    font-size: 13px;
+  }
+
+  .workloads-toolbar__search {
+    width: 350px;
+    max-width: 100%;
+  }
+
+  .workloads-toolbar-search-btn {
+    flex-shrink: 0;
+    display: flex;
+    width: 32px;
+    height: 32px;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--art-gray-300) 55%, transparent);
+    color: var(--el-text-color-secondary);
+    transition: background-color 0.15s ease;
+  }
+
+  .workloads-toolbar-search-btn:hover {
+    background: var(--art-gray-300);
+  }
+
+  .workloads-toolbar-search-btn:focus-visible {
+    outline: 2px solid var(--el-color-primary);
+    outline-offset: 1px;
+  }
+
+  .deploy-yaml-textarea :deep(textarea) {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 12px;
+  }
+</style>

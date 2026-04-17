@@ -1,0 +1,8 @@
+dist
+node_modules
+public
+.vscode
+
+src/components/Layout/MenuLeft/index.vue
+src/assets
+stats.html

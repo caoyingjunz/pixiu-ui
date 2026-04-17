@@ -1,0 +1,156 @@
+import { AppRouteRecord } from '@/types/router'
+
+/** 集群详情各子页（与 dashboard 一致：/container/<页面>?cluster=<name>） */
+const CLUSTER_DETAIL_LAYOUT = '/container/cluster-detail/layout'
+
+const clusterDetailChildren: AppRouteRecord[] = [
+  { path: 'overview', name: 'ClusterDetailOverview', component: '/container/cluster-detail/overview' },
+  { path: 'nodes', name: 'ClusterDetailNodes', component: '/container/cluster-detail/nodes' },
+  { path: 'namespaces', name: 'ClusterDetailNamespaces', component: '/container/cluster-detail/namespaces' },
+  { path: 'workloads', name: 'ClusterDetailWorkloads', component: '/container/cluster-detail/workloads' },
+  { path: 'pods', name: 'ClusterDetailPods', component: '/container/cluster-detail/pods' },
+  { path: 'services', name: 'ClusterDetailServices', component: '/container/cluster-detail/services' },
+  { path: 'config', name: 'ClusterDetailConfig', component: '/container/cluster-detail/config' },
+  { path: 'storage', name: 'ClusterDetailStorage', component: '/container/cluster-detail/storage' },
+  { path: 'autoscaling', name: 'ClusterDetailAutoscaling', component: '/container/cluster-detail/autoscaling' },
+  { path: 'auth', name: 'ClusterDetailAuth', component: '/container/cluster-detail/auth' },
+  { path: 'policy', name: 'ClusterDetailPolicy', component: '/container/cluster-detail/policy' },
+  {
+    path: 'addon-components',
+    name: 'ClusterDetailAddonComponents',
+    component: '/container/cluster-detail/addon-components'
+  },
+  { path: 'alert', name: 'ClusterDetailAlert', component: '/container/cluster-detail/alert' },
+  { path: 'logs', name: 'ClusterDetailLogs', component: '/container/cluster-detail/logs' },
+  { path: 'events', name: 'ClusterDetailEvents', component: '/container/cluster-detail/events' },
+  { path: 'prometheus', name: 'ClusterDetailPrometheus', component: '/container/cluster-detail/prometheus' }
+].map((c) => ({
+  path: c.path,
+  component: CLUSTER_DETAIL_LAYOUT,
+  meta: {
+    title: 'menus.container.clusterDetail',
+    isHide: true,
+    keepAlive: false
+  },
+  children: [
+    {
+      path: '',
+      name: c.name,
+      component: c.component,
+      meta: { title: 'menus.container.clusterDetail' }
+    }
+  ]
+}))
+
+export const containerRoutes: AppRouteRecord = {
+  path: '/container',
+  name: 'Container',
+  component: '/index/index',
+  meta: {
+    title: 'menus.container.title',
+    icon: 'ri:cloud-line'
+  },
+  children: [
+    {
+      path: 'cluster',
+      name: 'Cluster',
+      component: '/container/cluster',
+      meta: {
+        title: 'menus.container.cluster',
+        icon: 'ri:cloudy-2-line',
+        keepAlive: true
+      }
+    },
+    {
+      path: 'plan',
+      name: 'Plan',
+      component: '/container/plan/index',
+      meta: {
+        title: 'menus.container.plan',
+        icon: 'ri:rocket-line',
+        keepAlive: true
+      }
+    },
+    {
+      path: 'deployment-detail',
+      name: 'DeploymentDetail',
+      component: '/container/cluster-detail/deployment-detail/index',
+      meta: {
+        title: '工作负载详情',
+        isHide: true,
+        keepAlive: false
+      }
+    },
+    {
+      path: 'deployment-create',
+      name: 'DeploymentCreate',
+      component: '/container/cluster-detail/deployment-create/index',
+      meta: {
+        title: '创建 Deployment',
+        isHide: true,
+        keepAlive: false
+      }
+    },
+    {
+      path: 'node-detail',
+      name: 'NodeDetail',
+      component: '/container/cluster-detail/node-detail/index',
+      meta: {
+        title: '节点详情',
+        isHide: true,
+        keepAlive: false
+      }
+    },
+    {
+      path: 'statefulset-detail',
+      name: 'StatefulSetDetail',
+      component: '/container/cluster-detail/deployment-detail/index',
+      meta: {
+        title: '工作负载详情',
+        isHide: true,
+        keepAlive: false
+      }
+    },
+    {
+      path: 'daemonset-detail',
+      name: 'DaemonSetDetail',
+      component: '/container/cluster-detail/deployment-detail/index',
+      meta: {
+        title: '工作负载详情',
+        isHide: true,
+        keepAlive: false
+      }
+    },
+    {
+      path: 'job-detail',
+      name: 'JobDetail',
+      component: '/container/cluster-detail/deployment-detail/index',
+      meta: {
+        title: '工作负载详情',
+        isHide: true,
+        keepAlive: false
+      }
+    },
+    {
+      path: 'cronjob-detail',
+      name: 'CronJobDetail',
+      component: '/container/cluster-detail/deployment-detail/index',
+      meta: {
+        title: '工作负载详情',
+        isHide: true,
+        keepAlive: false
+      }
+    },
+    {
+      path: 'cluster/deploy',
+      name: 'ClusterDeploy',
+      component: '/container/cluster/deploy/index',
+      meta: {
+        title: '新建部署集群',
+        isHide: true,
+        keepAlive: false
+      }
+    },
+    ...clusterDetailChildren
+  ]
+}
