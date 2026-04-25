@@ -11,7 +11,7 @@
       >
         <template #left>
           <div class="node-toolbar">
-            <ElButton v-ripple @click="addNode">添加节点</ElButton>
+            <ElButton v-ripple @click="openAddNodeDialog">添加节点</ElButton>
             <div class="node-toolbar__filters">
               <ElInput
                 v-model="searchForm.name"
@@ -43,9 +43,9 @@
       <ArtTable
         row-key="rowKey"
         :loading="loading"
-        :data="data"
+        :data="mergedData"
         :columns="columns"
-        :pagination="pagination"
+        :pagination="effectivePagination"
         :pagination-options="{ align: 'right' }"
         @selection-change="handleNodeSelectionChange"
         @pagination:size-change="handleSizeChange"
@@ -54,7 +54,13 @@
     </ElCard>
 
     <!-- 查看 YAML -->
-    <ElDialog v-model="yamlVisible" title="查看 YAML" width="720px" destroy-on-close class="node-res-dialog">
+    <ElDialog
+      v-model="yamlVisible"
+      title="查看 YAML"
+      width="720px"
+      destroy-on-close
+      class="node-res-dialog"
+    >
       <ElInput v-model="yamlText" type="textarea" :rows="20" readonly class="node-yaml-textarea" />
       <template #footer>
         <ElButton type="primary" @click="copyYaml">复制</ElButton>
@@ -63,7 +69,13 @@
     </ElDialog>
 
     <!-- 标签管理 -->
-    <ElDialog v-model="labelVisible" title="标签管理" width="720px" destroy-on-close @close="resetLabelForm">
+    <ElDialog
+      v-model="labelVisible"
+      title="标签管理"
+      width="720px"
+      destroy-on-close
+      @close="resetLabelForm"
+    >
       <ElAlert type="info" :closable="false" show-icon class="mb-3">
         附加到 Kubernetes 对象上的键值对，用于标识与筛选对象。
       </ElAlert>
@@ -72,7 +84,9 @@
         <ElInput v-model="item.value" placeholder="值" class="label-row__val" />
         <ElButton text type="danger" @click="labelRows.splice(index, 1)">删除</ElButton>
       </div>
-      <ElButton text type="primary" class="mt-2" @click="labelRows.push({ key: '', value: '' })">+ 添加</ElButton>
+      <ElButton text type="primary" class="mt-2" @click="labelRows.push({ key: '', value: '' })"
+        >+ 添加</ElButton
+      >
       <template #footer>
         <ElButton @click="labelVisible = false">取消</ElButton>
         <ElButton type="primary" :loading="labelSubmitting" @click="submitLabels">确认</ElButton>
@@ -95,7 +109,9 @@
       <template #header>
         <span class="drawer-title">资源监控</span>
       </template>
-      <ElAlert type="info" :closable="false" show-icon class="mb-4">查看 Node 的资源指标（与 dashboard 相同 metrics 接口）。</ElAlert>
+      <ElAlert type="info" :closable="false" show-icon class="mb-4"
+        >查看 Node 的资源指标（与 dashboard 相同 metrics 接口）。</ElAlert
+      >
       <div class="monitor-charts">
         <div class="monitor-chart-block">
           <div class="monitor-chart-title">CPU 使用率（%）</div>
@@ -125,7 +141,9 @@
       <template #header>
         <span class="drawer-title">事件查询</span>
       </template>
-      <ElAlert type="info" :closable="false" show-icon class="mb-4">获取 Node 相关事件（与 dashboard 相同 events 接口）。</ElAlert>
+      <ElAlert type="info" :closable="false" show-icon class="mb-4"
+        >获取 Node 相关事件（与 dashboard 相同 events 接口）。</ElAlert
+      >
       <div class="event-toolbar">
         <ElButton type="primary" @click="loadEventList">查询</ElButton>
         <ElButton :disabled="!eventSelection.length" @click="batchDeleteEvents">批量删除</ElButton>
@@ -162,6 +180,75 @@
         />
       </div>
     </ElDrawer>
+
+    <ElDialog
+      v-model="addNodeDialogVisible"
+      :title="editNodeIndex >= 0 ? '编辑节点' : '新增节点'"
+      width="540px"
+      align-center
+      destroy-on-close
+      @closed="resetAddNodeForm"
+    >
+      <div class="add-node-body">
+        <div class="add-node-tip">
+          <ElIcon class="add-node-tip__icon"><InfoFilled /></ElIcon>
+          <span>Kubernetes 的节点选择，选择之后，可以根据实际情况调整。</span>
+        </div>
+        <ElForm
+          ref="addNodeFormRef"
+          :model="addNodeForm"
+          :rules="addNodeRules"
+          label-width="80px"
+          label-position="right"
+        >
+          <ElFormItem label="节点名称" prop="name">
+            <ElInput v-model="addNodeForm.name" placeholder="请输入节点名称" clearable />
+          </ElFormItem>
+          <ElFormItem label="角色" prop="roles">
+            <ElCheckboxGroup v-model="addNodeForm.roles">
+              <ElCheckbox value="master">master</ElCheckbox>
+              <ElCheckbox value="node">node</ElCheckbox>
+            </ElCheckboxGroup>
+          </ElFormItem>
+          <ElFormItem label="IP地址" prop="ip">
+            <ElInput v-model="addNodeForm.ip" placeholder="请输入 IP 地址" clearable />
+          </ElFormItem>
+          <ElFormItem label="登陆方式">
+            <ElRadioGroup v-model="addNodeForm.authType" class="add-node-auth-group">
+              <ElRadioButton value="password">密码登陆</ElRadioButton>
+              <ElRadioButton value="key">密钥登陆</ElRadioButton>
+            </ElRadioGroup>
+          </ElFormItem>
+          <ElFormItem label="用户名">
+            <span style="color: var(--el-text-color-regular)">root</span>
+          </ElFormItem>
+          <template v-if="addNodeForm.authType === 'password'">
+            <ElFormItem label="密码" prop="password">
+              <ElInput
+                v-model="addNodeForm.password"
+                type="password"
+                placeholder="请输入密码"
+                show-password
+              />
+            </ElFormItem>
+          </template>
+          <template v-else>
+            <ElFormItem label="私钥" prop="privateKey">
+              <ElInput
+                v-model="addNodeForm.privateKey"
+                type="textarea"
+                :rows="5"
+                placeholder="请粘贴 SSH 私钥内容（PEM 格式）"
+              />
+            </ElFormItem>
+          </template>
+        </ElForm>
+      </div>
+      <template #footer>
+        <ElButton @click="addNodeDialogVisible = false">取消</ElButton>
+        <ElButton type="primary" @click="submitAddNode">确定</ElButton>
+      </template>
+    </ElDialog>
   </div>
 </template>
 
@@ -169,8 +256,13 @@
   import {
     ElAlert,
     ElButton,
+    ElCheckbox,
+    ElCheckboxGroup,
     ElDialog,
     ElDrawer,
+    ElForm,
+    ElFormItem,
+    ElIcon,
     ElInput,
     ElLink,
     ElMessage,
@@ -178,14 +270,19 @@
     ElOption,
     ElPagination,
     ElPopover,
+    ElRadioButton,
+    ElRadioGroup,
     ElSelect,
     ElTable,
     ElTableColumn,
     ElTag
   } from 'element-plus'
-  import ArtButtonMore, { type ButtonMoreItem } from '@/components/core/forms/art-button-more/index.vue'
-  import { CopyDocument } from '@element-plus/icons-vue'
-  import { h, ref, computed, watch, onUnmounted } from 'vue'
+  import type { FormInstance, FormRules } from 'element-plus'
+  import ArtButtonMore, {
+    type ButtonMoreItem
+  } from '@/components/core/forms/art-button-more/index.vue'
+  import { CopyDocument, InfoFilled } from '@element-plus/icons-vue'
+  import { h, ref, computed, onUnmounted } from 'vue'
   import { useRoute, useRouter } from 'vue-router'
   import { useTable } from '@/hooks/core/useTable'
   import {
@@ -225,7 +322,9 @@
   const hideStatusFilter = computed(() => props.hideStatusFilter)
   const hideExtraColumns = computed(() => props.hideExtraColumns)
   const headerLayout = computed(() =>
-    props.hideFullscreenTool ? 'search,size,columns,settings' : 'search,size,fullscreen,columns,settings'
+    props.hideFullscreenTool
+      ? 'search,size,columns,settings'
+      : 'search,size,fullscreen,columns,settings'
   )
 
   function formatNodeMemory(raw: string): string {
@@ -289,24 +388,25 @@
     if (lines.length === 0) {
       return h(
         'span',
-        { class: 'node-labels-empty', style: 'font-size:12px;color:var(--el-text-color-secondary)' },
+        {
+          class: 'node-labels-empty',
+          style: 'font-size:12px;color:var(--el-text-color-secondary)'
+        },
         '—'
       )
     }
     const preview = lines.slice(0, 2)
     const hasMore = lines.length > 2
     const triggerContent = h('div', { class: 'node-labels-cell-trigger' }, [
-      ...preview.map((text, i) =>
-        h('div', { key: `p-${i}`, class: 'node-labels-line' }, text)
-      ),
-      ...(hasMore ? [h('div', { key: 'more', class: 'node-labels-line node-labels-more' }, '...')] : [])
+      ...preview.map((text, i) => h('div', { key: `p-${i}`, class: 'node-labels-line' }, text)),
+      ...(hasMore
+        ? [h('div', { key: 'more', class: 'node-labels-line node-labels-more' }, '...')]
+        : [])
     ])
     const popoverBody = h(
       'div',
       { class: 'node-labels-popper-scroll' },
-      lines.map((text, i) =>
-        h('div', { key: `f-${i}`, class: 'node-labels-popper-line' }, text)
-      )
+      lines.map((text, i) => h('div', { key: `f-${i}`, class: 'node-labels-popper-line' }, text))
     )
     return h(
       ElPopover,
@@ -341,7 +441,16 @@
       immediate: true,
       apiFn: async (params: TableParams) => {
         const cluster = String(route.query.cluster ?? '')
-        if (!cluster) return { code: 200, data: { records: [] as (K8sNode & { rowKey?: string })[], total: 0, current: 1, size: params.size } }
+        if (!cluster)
+          return {
+            code: 200,
+            data: {
+              records: [] as (K8sNode & { rowKey?: string })[],
+              total: 0,
+              current: 1,
+              size: params.size
+            }
+          }
         const { items, total } = await fetchK8sNodeList(cluster, {
           page: params.current,
           limit: params.size,
@@ -353,72 +462,81 @@
         if (statusFilter) {
           list = list.filter((n) => formatNodeStatusText(n) === statusFilter)
         }
-        const records = list.map((n, i) => ({ ...n, rowKey: n.metadata?.uid ?? n.metadata?.name ?? `node-${i}` }))
-        return { code: 200, data: { records, total: statusFilter ? records.length : total, current: params.current, size: params.size } }
+        const records = list.map((n, i) => ({
+          ...n,
+          rowKey: n.metadata?.uid ?? n.metadata?.name ?? `node-${i}`
+        }))
+        return {
+          code: 200,
+          data: {
+            records,
+            total: statusFilter ? records.length : total,
+            current: params.current,
+            size: params.size
+          }
+        }
       },
       apiParams: { current: 1, size: 10, name: undefined, status: undefined },
       columnsFactory: () => {
         const baseColumns: any[] = [
           { type: 'selection' },
           {
-          prop: 'metadata.name',
-          label: '节点名称',
-          minWidth: 200,
-          formatter: (row: K8sNode & { rowKey?: string }) => {
-            const name = row.metadata?.name ?? '—'
-            const labels = row.metadata?.labels ?? {}
-            const isControlPlane =
-              'node-role.kubernetes.io/control-plane' in labels ||
-              'node-role.kubernetes.io/master' in labels
-            return h('div', { style: 'line-height:1.8' }, [
-              h('div', { style: 'display:flex;align-items:center;gap:8px' }, [
-                h(
-                  ElLink,
-                  {
-                    type: 'primary',
-                    underline: 'never',
-                    style: 'font-size:14px',
-                    onClick: () =>
-                      router.push({
-                        path: '/container/node-detail',
-                        query: { cluster: String(route.query.cluster ?? ''), name }
-                      })
-                  },
-                  () => name
-                ),
-                isControlPlane
-                  ? h('span', { style: 'font-size:10px;padding:0 4px;line-height:16px;border-radius:3px;background:var(--el-color-success-light-9);color:var(--el-color-success);border:1px solid var(--el-color-success-light-7);flex-shrink:0' }, '管控')
-                  : null,
-                h(
-                  'span',
-                  {
-                    class: 'icon-action',
-                    title: '复制',
-                    style:
-                      'cursor:pointer;color:var(--el-text-color-secondary);display:inline-flex;align-items:center',
-                    onClick: (e: MouseEvent) => {
-                      e.stopPropagation()
-                      const nm = row.metadata?.name
-                      if (nm) {
-                        void navigator.clipboard.writeText(nm)
-                        ElMessage.success('已复制')
+            prop: 'metadata.name',
+            label: '节点名称',
+            minWidth: 200,
+            formatter: (row: K8sNode & { rowKey?: string }) => {
+              const name = row.metadata?.name ?? '—'
+              const labels = row.metadata?.labels ?? {}
+              const isControlPlane =
+                'node-role.kubernetes.io/control-plane' in labels ||
+                'node-role.kubernetes.io/master' in labels
+              return h('div', { style: 'line-height:1.8' }, [
+                h('div', { style: 'display:flex;align-items:center;gap:8px' }, [
+                  h(
+                    ElLink,
+                    {
+                      type: 'primary',
+                      underline: 'never',
+                      style: 'font-size:14px',
+                      onClick: () =>
+                        router.push({
+                          path: '/container/node-detail',
+                          query: { cluster: String(route.query.cluster ?? ''), name }
+                        })
+                    },
+                    () => name
+                  ),
+                  isControlPlane
+                    ? h(
+                        'span',
+                        {
+                          style:
+                            'font-size:10px;padding:0 4px;line-height:16px;border-radius:3px;background:var(--el-color-success-light-9);color:var(--el-color-success);border:1px solid var(--el-color-success-light-7);flex-shrink:0'
+                        },
+                        '管控'
+                      )
+                    : null,
+                  h(
+                    'span',
+                    {
+                      class: 'icon-action',
+                      title: '复制',
+                      style:
+                        'cursor:pointer;color:var(--el-text-color-secondary);display:inline-flex;align-items:center',
+                      onClick: (e: MouseEvent) => {
+                        e.stopPropagation()
+                        const nm = row.metadata?.name
+                        if (nm) {
+                          void navigator.clipboard.writeText(nm)
+                          ElMessage.success('已复制')
+                        }
                       }
-                    }
-                  },
-                  [h(CopyDocument, { style: 'width:12px;height:12px' })]
-                )
+                    },
+                    [h(CopyDocument, { style: 'width:12px;height:12px' })]
+                  )
+                ])
               ])
-            ])
-          }
-        },
-          {
-          prop: 'status',
-          label: '状态',
-          width: 110,
-          formatter: (row: K8sNode) => {
-            const text = formatNodeStatusText(row)
-            return h(ElTag, { type: nodeStatusTagType(text), size: 'small' }, () => text)
-          }
+            }
           }
         ]
 
@@ -441,11 +559,7 @@
               }
               return h('div', { style: 'display:flex;gap:6px;flex-wrap:wrap' }, [
                 ...roles.map((r) =>
-                  h(
-                    ElTag,
-                    { size: 'small', type: r === 'master' ? 'primary' : 'info' },
-                    () => r
-                  )
+                  h(ElTag, { size: 'small', type: r === 'master' ? 'primary' : 'info' }, () => r)
                 )
               ])
             }
@@ -470,72 +584,131 @@
 
         const extraColumns: any[] = [
           {
-          prop: 'runtime',
-          label: '运行时',
-          minWidth: 160,
-          showOverflowTooltip: true,
-          formatter: (row: K8sNode) => h('span', { style: 'font-size:12px' }, formatContainerRuntime(row))
-        },
+            prop: 'runtime',
+            label: '运行时',
+            minWidth: 160,
+            showOverflowTooltip: true,
+            formatter: (row: K8sNode) =>
+              h('span', { style: 'font-size:12px' }, formatContainerRuntime(row))
+          },
           {
-          prop: 'os',
-          label: '操作系统',
-          minWidth: 160,
-          showOverflowTooltip: true,
-          formatter: (row: K8sNode) => {
-            const os = row.status?.nodeInfo?.osImage ?? '—'
-            return h('span', { style: 'font-size:12px' }, os)
-          }
-        },
+            prop: 'os',
+            label: '操作系统',
+            minWidth: 160,
+            showOverflowTooltip: true,
+            formatter: (row: K8sNode) => {
+              const os = row.status?.nodeInfo?.osImage ?? '—'
+              return h('span', { style: 'font-size:12px' }, os)
+            }
+          },
           {
-          prop: 'resource',
-          label: '节点规格',
-          minWidth: 140,
-          formatter: (row: K8sNode) => {
-            const cpuRaw = row.status?.allocatable?.cpu ?? row.status?.capacity?.cpu ?? '—'
-            const cpu = formatNodeCpu(cpuRaw)
-            const memRaw = row.status?.allocatable?.memory ?? row.status?.capacity?.memory ?? ''
-            const mem = memRaw ? formatNodeMemory(memRaw) : '—'
-            const s = 'font-size:11px;white-space:nowrap'
-            return h('div', { style: 'line-height:1.8' }, [
-              h('div', { style: s }, `CPU: ${cpu}`),
-              h('div', { style: s }, `内存: ${mem}`)
-            ])
-          }
-        },
+            prop: 'resource',
+            label: '节点规格',
+            minWidth: 140,
+            formatter: (row: K8sNode) => {
+              const cpuRaw = row.status?.allocatable?.cpu ?? row.status?.capacity?.cpu ?? '—'
+              const cpu = formatNodeCpu(cpuRaw)
+              const memRaw = row.status?.allocatable?.memory ?? row.status?.capacity?.memory ?? ''
+              const mem = memRaw ? formatNodeMemory(memRaw) : '—'
+              const s = 'font-size:11px;white-space:nowrap'
+              return h('div', { style: 'line-height:1.8' }, [
+                h('div', { style: s }, `CPU: ${cpu}`),
+                h('div', { style: s }, `内存: ${mem}`)
+              ])
+            }
+          },
           {
-          prop: 'metadata.labels',
-          label: 'Labels',
-          minWidth: 200,
-          formatter: (row: K8sNode) => renderNodeLabelsCell(row)
+            prop: 'metadata.labels',
+            label: 'Labels',
+            minWidth: 200,
+            formatter: (row: K8sNode) => renderNodeLabelsCell(row)
           }
         ]
 
-        const tailColumns: any[] = [
-          {
+        const createdColumn = {
           prop: 'created',
           label: '创建时间',
           width: 168,
           formatter: (row: K8sNode) =>
-            h('span', { style: 'font-size:12px;color:var(--el-text-color-secondary)' }, formatNodeCreationTime(row.metadata?.creationTimestamp))
-        },
+            h(
+              'span',
+              { style: 'font-size:12px;color:var(--el-text-color-secondary)' },
+              formatNodeCreationTime(row.metadata?.creationTimestamp)
+            )
+        }
+
+        const tailColumns: any[] = [
+          ...(hideExtraColumns.value ? [] : [createdColumn]),
           {
-          prop: 'operation',
-          label: '操作',
-          width: 180,
-          fixed: 'right',
-          formatter: (row: K8sNode) =>
-            h('div', { style: 'display:flex;align-items:center;gap:12px;flex-wrap:nowrap' }, [
-              h(ElLink, { type: 'primary', underline: 'never', style: 'font-size:12px', onClick: () => nodeMoreClick({ key: 'labels', label: '' }, row) }, () => '标签管理'),
-              h(ElLink, { type: 'primary', underline: 'never', style: 'font-size:12px', onClick: () => nodeMoreClick({ key: 'schedule', label: '' }, row) }, () => row.spec?.unschedulable ? '开启调度' : '禁止调度'),
-              h(ArtButtonMore, {
-                list: [
-                  { key: 'yaml', label: '查看YAML', icon: 'ri:file-code-line' },
-                  { key: 'drain', label: '清空节点', icon: 'ri:logout-box-r-line' },
-                  { key: 'delete', label: '删除', icon: 'ri:delete-bin-4-line', color: '#f56c6c' }
-                ],
-                onClick: (item: ButtonMoreItem) => nodeMoreClick(item, row)
-              })
-            ])
+            prop: 'operation',
+            label: '操作',
+            width: 160,
+            fixed: 'right',
+            formatter: (row: any) => {
+              if (row._local) {
+                return h('div', { style: 'display:flex;align-items:center;gap:12px' }, [
+                  h(
+                    ElLink,
+                    {
+                      type: 'primary',
+                      underline: 'never',
+                      style: 'font-size:12px',
+                      onClick: () => openEditNodeDialog(row._localIndex)
+                    },
+                    () => '编辑'
+                  ),
+                  h(
+                    ElLink,
+                    {
+                      type: 'danger',
+                      underline: 'never',
+                      style: 'font-size:12px',
+                      onClick: () => deleteLocalNode(row._localIndex)
+                    },
+                    () => '删除'
+                  )
+                ])
+              }
+              return h(
+                'div',
+                { style: 'display:flex;align-items:center;gap:12px;flex-wrap:nowrap' },
+                [
+                  h(
+                    ElLink,
+                    {
+                      type: 'primary',
+                      underline: 'never',
+                      style: 'font-size:12px',
+                      onClick: () => nodeMoreClick({ key: 'labels', label: '' }, row)
+                    },
+                    () => '标签管理'
+                  ),
+                  h(
+                    ElLink,
+                    {
+                      type: 'primary',
+                      underline: 'never',
+                      style: 'font-size:12px',
+                      onClick: () => nodeMoreClick({ key: 'schedule', label: '' }, row)
+                    },
+                    () => (row.spec?.unschedulable ? '开启调度' : '禁止调度')
+                  ),
+                  h(ArtButtonMore, {
+                    list: [
+                      { key: 'yaml', label: '查看YAML', icon: 'ri:file-code-line' },
+                      { key: 'drain', label: '清空节点', icon: 'ri:logout-box-r-line' },
+                      {
+                        key: 'delete',
+                        label: '删除',
+                        icon: 'ri:delete-bin-4-line',
+                        color: '#f56c6c'
+                      }
+                    ],
+                    onClick: (item: ButtonMoreItem) => nodeMoreClick(item, row)
+                  })
+                ]
+              )
+            }
           }
         ]
 
@@ -556,16 +729,122 @@
     getData()
   }
 
-  /** 与 dashboard 新增节点一致：暂未开放 */
-  function addNode() {
-    ElMessage.warning('暂不支持，功能开发中')
-  }
-
   function onRefresh() {
     refreshData()
   }
 
   // —— YAML ——
+  const addNodeDialogVisible = ref(false)
+  const editNodeIndex = ref(-1)
+
+  interface LocalNode {
+    name: string
+    roles: string[]
+    ip: string
+    authType: string
+    user: string
+    password: string
+    privateKey: string
+  }
+
+  const localNodes = ref<LocalNode[]>([])
+
+  // pagination 是 readonly，不能直接修改 total；用 computed 合并本地节点数量
+  const effectivePagination = computed(() => ({
+    ...pagination,
+    total: pagination.total + localNodes.value.length
+  }))
+
+  const mergedData = computed(() => [
+    ...localNodes.value.map((n, i) => ({
+      ...n,
+      _local: true,
+      _localIndex: i,
+      rowKey: `local-${i}-${n.name}`
+    })),
+    ...data.value
+  ])
+
+  const addNodeFormRef = ref<FormInstance>()
+  const addNodeForm = ref<LocalNode>({
+    name: '',
+    roles: ['master'],
+    ip: '',
+    authType: 'password',
+    user: 'root',
+    password: '',
+    privateKey: ''
+  })
+
+  const ipPattern = /^(\d{1,3}\.){3}\d{1,3}$/
+  const addNodeRules: FormRules = {
+    name: [{ required: true, message: '请输入节点名称', trigger: 'blur' }],
+    roles: [
+      {
+        validator: (_r: any, val: string[], cb: any) => {
+          val && val.length > 0 ? cb() : cb(new Error('请至少选择一个角色'))
+        },
+        trigger: 'change'
+      }
+    ],
+    ip: [
+      { required: true, message: '请输入 IP 地址', trigger: 'blur' },
+      {
+        validator: (_r: any, val: string, cb: any) => {
+          ipPattern.test(val) ? cb() : cb(new Error('请输入有效的 IP 地址'))
+        },
+        trigger: 'blur'
+      }
+    ],
+    password: [{ required: true, message: '请输入密码', trigger: 'blur' }],
+    privateKey: [{ required: true, message: '请粘贴私钥内容', trigger: 'blur' }]
+  }
+
+  function openAddNodeDialog() {
+    editNodeIndex.value = -1
+    resetAddNodeForm()
+    addNodeDialogVisible.value = true
+  }
+
+  function openEditNodeDialog(index: number) {
+    editNodeIndex.value = index
+    const node = localNodes.value[index]
+    addNodeForm.value = { ...node }
+    addNodeDialogVisible.value = true
+  }
+
+  function deleteLocalNode(index: number) {
+    localNodes.value.splice(index, 1)
+  }
+
+  function resetAddNodeForm() {
+    addNodeForm.value = {
+      name: '',
+      roles: ['master'],
+      ip: '',
+      authType: 'password',
+      user: 'root',
+      password: '',
+      privateKey: ''
+    }
+    addNodeFormRef.value?.clearValidate()
+  }
+
+  async function submitAddNode() {
+    const valid = await addNodeFormRef.value
+      ?.validate()
+      .then(() => true)
+      .catch(() => false)
+    if (!valid) return
+    const node: LocalNode = { ...addNodeForm.value }
+    if (editNodeIndex.value >= 0) {
+      localNodes.value.splice(editNodeIndex.value, 1, node)
+    } else {
+      localNodes.value.push(node)
+    }
+    addNodeDialogVisible.value = false
+  }
+
   const yamlVisible = ref(false)
   const yamlText = ref('')
 
@@ -917,6 +1196,11 @@
     margin-left: 8px !important;
   }
 
+  /* 整体表头上移，左右图标一起对齐 */
+  .nodes-page :deep(#art-table-header) {
+    margin-top: 0px;
+  }
+
   .node-toolbar__name {
     width: 250px;
     max-width: 100%;
@@ -1061,5 +1345,36 @@
     line-height: 1.5;
     color: var(--el-text-color-regular);
     word-break: break-all;
+  }
+</style>
+
+<style scoped>
+  .add-node-body {
+    padding: 0 16px;
+  }
+
+  .add-node-tip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    margin-top: -20px;
+    margin-bottom: 20px;
+    background-color: var(--el-color-primary-light-9);
+    border-radius: 6px;
+    font-size: 13px;
+    color: var(--el-color-primary);
+    line-height: 1.5;
+  }
+
+  .add-node-tip__icon {
+    flex-shrink: 0;
+    font-size: 16px;
+    color: var(--el-color-primary);
+  }
+
+  .add-node-auth-group {
+    display: flex;
+    gap: 0;
   }
 </style>

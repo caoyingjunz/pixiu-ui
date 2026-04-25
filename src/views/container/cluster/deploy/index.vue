@@ -31,7 +31,7 @@
               @update:form="form = $event"
             />
           </ElTabPane>
-          <ElTabPane label="节点2" name="2">
+          <ElTabPane label="节点" name="2">
             <ClusterDetailNodes
               :hide-status-filter="true"
               :hide-fullscreen-tool="true"
