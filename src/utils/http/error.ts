@@ -156,9 +156,8 @@ export function handleError(error: AxiosError<ErrorResponse>): never {
 export function showError(error: HttpError, showMessage: boolean = true): void {
   if (showMessage) {
     ElMessage.error(error.message)
+    console.error('[HTTP Error]', error.toLogData())
   }
-  // 记录错误日志
-  console.error('[HTTP Error]', error.toLogData())
 }
 
 /**

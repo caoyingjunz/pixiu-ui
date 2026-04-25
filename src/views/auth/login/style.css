@@ -8,7 +8,7 @@
     max-md:animate-none;
 
   .form {
-    @apply h-full py-[40px];
+    @apply h-full flex flex-col justify-center py-[40px];
   }
 
   .title {
