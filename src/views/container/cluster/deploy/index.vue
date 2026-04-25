@@ -32,10 +32,11 @@
             />
           </ElTabPane>
           <ElTabPane label="节点" name="2">
-            <ClusterDetailNodes
-              :hide-status-filter="true"
-              :hide-fullscreen-tool="true"
-              :hide-extra-columns="true"
+            <StepNodes
+              ref="stepNodesRef"
+              :form="form"
+              :read-only="isDetailMode"
+              @update:form="form = $event"
             />
           </ElTabPane>
           <ElTabPane label="信息确认" name="3">
@@ -79,8 +80,8 @@
   import { ArrowLeft } from '@element-plus/icons-vue'
   import { useRoute, useRouter } from 'vue-router'
   import { fetchCreatePlan, fetchPlanWithResources } from '@/api/plan'
-  import ClusterDetailNodes from '@/views/container/cluster-detail/nodes.vue'
   import StepBasic from './steps/StepBasic.vue'
+  import StepNodes from './steps/StepNodes.vue'
   import StepClusterConfig from './steps/StepClusterConfig.vue'
   import StepConfirm from './steps/StepConfirm.vue'
   import type { DeployClusterForm, NodeConfig } from './steps/StepBasic.vue'
@@ -105,13 +106,14 @@
 
   const stepBasicRef = ref<StepRef>(null)
   const stepClusterConfigRef = ref<StepRef>(null)
+  const stepNodesRef = ref<StepRef>(null)
   const stepConfirmRef = ref<StepRef>(null)
 
   function getStepRef(idx: number): StepRef {
     const refs: StepRef[] = [
       stepBasicRef.value,
       stepClusterConfigRef.value,
-      null,
+      stepNodesRef.value,
       stepConfirmRef.value
     ]
     return refs[idx] ?? null
