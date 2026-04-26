@@ -11,7 +11,7 @@
           <ElBreadcrumbItem :to="{ path: '/container/cluster' }">集群管理</ElBreadcrumbItem>
           <ElBreadcrumbItem>{{ pageTitle }}</ElBreadcrumbItem>
         </ElBreadcrumb>
-        <template v-if="hasPlanId">
+        <template v-if="hasPlanId && !isCopyMode">
           <ElDivider direction="vertical" class="deploy-create-header-divider" />
           <span class="deploy-create-status-label">状态:</span>
           <ElTag :type="planStatusTagType" effect="light" size="small">{{ planStatusText }}</ElTag>
@@ -92,7 +92,13 @@
 <script setup lang="ts">
   import { ArrowLeft } from '@element-plus/icons-vue'
   import { useRoute, useRouter } from 'vue-router'
-  import { fetchCreatePlan, fetchPlanWithResources, fetchStartPlan, fetchUpdatePlan } from '@/api/plan'
+  import {
+    fetchCreatePlan,
+    fetchPlan,
+    fetchPlanWithResources,
+    fetchStartPlan,
+    fetchUpdatePlan
+  } from '@/api/plan'
   import StepBasic from './steps/StepBasic.vue'
   import StepNodes from './steps/StepNodes.vue'
   import StepClusterConfig from './steps/StepClusterConfig.vue'
@@ -111,12 +117,14 @@
   const hasPlanId = computed(() => Number.isFinite(currentPlanId.value) && currentPlanId.value > 0)
   const pageMode = computed(() => (queryMode.value ? queryMode.value : hasPlanId.value ? 'detail' : 'create'))
   const isCreateMode = computed(() => !hasPlanId.value || pageMode.value === 'create')
+  const isCopyMode = computed(() => hasPlanId.value && pageMode.value === 'copy')
   const isEditMode = computed(() => hasPlanId.value && pageMode.value === 'edit')
   const isDetailMode = computed(() => hasPlanId.value && pageMode.value === 'detail')
   const isReadOnlyMode = computed(() => isDetailMode.value)
   const pageTitle = computed(() => {
     if (isDetailMode.value) return '部署详情'
     if (isEditMode.value) return '修改部署'
+    if (isCopyMode.value) return '拷贝部署'
     return '新建部署集群'
   })
 
@@ -139,6 +147,7 @@
   const lockImmutableFields = computed(
     () => isEditMode.value && planStatusText.value !== '未开始'
   )
+  const shouldSubmitAsUpdate = computed(() => isEditMode.value)
 
   const stepBasicRef = ref<StepRef>(null)
   const stepClusterConfigRef = ref<StepRef>(null)
@@ -203,10 +212,10 @@
 
   async function loadPlanDetail(planId: number) {
     try {
-      const detail = await fetchPlanWithResources(planId)
-      planStatusText.value = String((detail as any)?.step ?? '未开始')
+      const [detail, planMeta] = await Promise.all([fetchPlanWithResources(planId), fetchPlan(planId)])
+      planStatusText.value = planMeta.step || '未开始'
       const cfg = detail.config ?? {}
-      currentResourceVersion.value = Number(detail.resource_version ?? 0)
+      currentResourceVersion.value = Number(planMeta.resourceVersion ?? detail.resource_version ?? 0)
       const osImage = cfg.os_image ?? ''
       const highAvailability = Boolean((cfg.kubernetes as any)?.high_availability)
       const apiServerPortRaw = Number((cfg.network as any)?.api_server_port ?? (highAvailability ? 8443 : 6443))
@@ -239,6 +248,15 @@
     }
   }
 
+  async function ensureResourceVersion(planId: number) {
+    if (currentResourceVersion.value) return
+    const planMeta = await fetchPlan(planId)
+    currentResourceVersion.value = Number(planMeta.resourceVersion ?? 0)
+    if (!planStatusText.value || planStatusText.value === '未开始') {
+      planStatusText.value = planMeta.step || '未开始'
+    }
+  }
+
   function goToStep(step: number) {
     if (!isReadOnlyMode.value) activeTabName.value = String(step)
   }
@@ -262,7 +280,7 @@
   }
 
   function goBack() {
-    if (isDetailMode.value || isEditMode.value) {
+    if (isDetailMode.value || isEditMode.value || isCopyMode.value) {
       router.push('/container/plan')
     } else {
       router.push('/container/cluster')
@@ -334,14 +352,16 @@
   }
 
   async function onSubmit() {
-    // 提交前逐步校验
-    for (let i = 0; i < 4; i++) {
-      const ref = getStepRef(i)
-      if (ref) {
-        const valid = await ref.validate()
-        if (!valid) {
-          activeTabName.value = String(i)
-          return
+    // 新建模式：提交前逐步校验；编辑模式：直接提交，由后端做最终校验
+    if (!isEditMode.value) {
+      for (let i = 0; i < 4; i++) {
+        const ref = getStepRef(i)
+        if (ref) {
+          const valid = await ref.validate()
+          if (!valid) {
+            activeTabName.value = String(i)
+            return
+          }
         }
       }
     }
@@ -349,7 +369,8 @@
     submitting.value = true
     try {
       const payload = buildPlanPayload()
-      if (isEditMode.value) {
+      if (shouldSubmitAsUpdate.value) {
+        await ensureResourceVersion(currentPlanId.value)
         if (!currentResourceVersion.value) {
           ElMessage.error('缺少资源版本，无法修改，请重新进入页面后重试')
           return
@@ -367,14 +388,14 @@
       }
     } catch (e: unknown) {
       const err = e as Error
-      ElMessage.error(err.message || (isEditMode.value ? '修改失败，请重试' : '创建失败，请重试'))
+      ElMessage.error(err.message || (shouldSubmitAsUpdate.value ? '修改失败，请重试' : '创建失败，请重试'))
     } finally {
       submitting.value = false
     }
   }
 
   onMounted(() => {
-    if (isDetailMode.value || isEditMode.value) {
+    if (isDetailMode.value || isEditMode.value || isCopyMode.value) {
       void loadPlanDetail(currentPlanId.value)
     }
   })

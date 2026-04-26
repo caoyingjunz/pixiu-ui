@@ -177,6 +177,17 @@ export async function fetchPlanList(params?: {
 }
 
 /**
+ * GET /pixiu/plans/:id
+ * 获取单个部署计划基础信息（含 resource_version）
+ */
+export async function fetchPlan(id: number): Promise<PlanItemFormatted> {
+  const res = await pixiuAxios.get(`/pixiu/plans/${id}`)
+  const { code, result, message } = res.data
+  if (code !== 200) throw new Error(message || '获取部署计划详情失败')
+  return toPlanItem(result as PlanItem)
+}
+
+/**
  * DELETE /pixiu/plans/:id
  * 删除部署计划
  */

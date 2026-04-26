@@ -293,10 +293,15 @@
               ),
               h(ArtButtonMore, {
                 list: [
+                  { key: 'copy', label: '拷贝', icon: 'ri:file-copy-2-line' },
                   { key: 'edit', label: '编辑', icon: 'ri:edit-2-line' },
                   { key: 'delete', label: '删除', icon: 'ri:delete-bin-line' }
                 ],
                 onClick: (item: ButtonMoreItem) => {
+                  if (item.key === 'copy') {
+                    goToCopy(row)
+                    return
+                  }
                   if (item.key === 'edit') {
                     goToEdit(row)
                     return
@@ -345,6 +350,13 @@
     router.push({
       path: '/container/cluster/deploy',
       query: { planId: String(row.id), mode: 'edit' }
+    })
+  }
+
+  function goToCopy(row: PlanItemFormatted) {
+    router.push({
+      path: '/container/cluster/deploy',
+      query: { planId: String(row.id), mode: 'copy' }
     })
   }
 
