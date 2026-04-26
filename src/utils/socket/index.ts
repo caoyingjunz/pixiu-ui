@@ -39,7 +39,7 @@ export default class WebSocketClient {
   private isReconnecting: boolean = false
 
   private constructor(options: WebSocketOptions) {
-    this.url = options.url || (process.env.VUE_APP_LOGIN_WEBSOCKET as string)
+    this.url = this.sanitizeWebSocketUrl(options.url || (process.env.VUE_APP_LOGIN_WEBSOCKET as string))
     this.messageHandler = options.messageHandler
     this.reconnectInterval = options.reconnectInterval ?? 20 * 1000 // 默认20秒
     this.heartbeatInterval = options.heartbeatInterval ?? 5 * 1000 // 默认5秒
@@ -47,6 +47,26 @@ export default class WebSocketClient {
     this.reconnectTimeout = options.reconnectTimeout ?? 30 * 1000 // 默认30秒
     this.maxReconnectAttempts = options.maxReconnectAttempts ?? 10 // 默认最多重连10次
     this.connectionTimeout = options.connectionTimeout ?? 10 * 1000 // 连接超时10秒
+  }
+
+  /**
+   * 清洗 WebSocket URL，避免 token 出现在查询参数中
+   */
+  private sanitizeWebSocketUrl(url: string): string {
+    if (!url) return url
+
+    try {
+      const parsedUrl = new URL(url, window.location.origin)
+      parsedUrl.searchParams.delete('token')
+      return parsedUrl.toString()
+    } catch {
+      // URL 非标准格式时，降级处理删除 token 查询参数
+      return url.replace(/([?&])token=[^&]*(&)?/, (match, prefix, suffix) => {
+        if (prefix === '?' && suffix) return '?'
+        if (prefix === '&' && suffix) return '&'
+        return ''
+      })
+    }
   }
 
   // 单例模式获取实例
@@ -58,7 +78,7 @@ export default class WebSocketClient {
       WebSocketClient.instance.messageHandler = options.messageHandler
       // 如果提供了新的URL，则更新并重新连接
       if (options.url && WebSocketClient.instance.url !== options.url) {
-        WebSocketClient.instance.url = options.url
+        WebSocketClient.instance.url = WebSocketClient.instance.sanitizeWebSocketUrl(options.url)
         WebSocketClient.instance.reconnectAttempts = 0
         WebSocketClient.instance.init()
       }
