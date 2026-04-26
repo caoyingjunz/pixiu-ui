@@ -2633,7 +2633,7 @@
         `&pod=${encodeURIComponent(pod)}` +
         `&container=${encodeURIComponent(container)}` +
         `&command=${encodeURIComponent(command)}`
-      const token = localStorage.getItem('token')
+      const token = localStorage.getItem('pixiu-access-token')
       const socket = token ? new WebSocket(wsUrl, [token]) : new WebSocket(wsUrl)
       let settled = false
       let sawErrorText = false

@@ -207,7 +207,22 @@
   const ipPattern = /^(\d{1,3}\.){3}\d{1,3}$/
 
   const nodeRules: FormRules = {
-    name: [{ required: true, message: '请输入节点名称', trigger: 'blur' }],
+    name: [
+      { required: true, message: '请输入节点名称', trigger: 'blur' },
+      {
+        validator: (_r, value: string, cb) => {
+          const hostname = String(value ?? '').trim()
+          // Linux 主机名：1-63 位，仅小写字母/数字/中划线，且不能以中划线开头或结尾
+          const hostnamePattern = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/
+          if (!hostnamePattern.test(hostname)) {
+            cb(new Error('主机名称需符合 Linux 规范：1-63 位，小写字母/数字/中划线，且不能以中划线开头或结尾'))
+            return
+          }
+          cb()
+        },
+        trigger: 'blur'
+      }
+    ],
     role: [
       {
         validator: (_r, value: string[], cb) => {

@@ -1,15 +1,26 @@
 <template>
   <div class="deploy-create-page">
     <div class="deploy-create-header">
-      <ElButton text class="deploy-create-back-btn" @click="goBack">
-        <ElIcon><ArrowLeft /></ElIcon>
-        <span>返回</span>
-      </ElButton>
-      <ElDivider direction="vertical" class="deploy-create-header-divider" />
-      <ElBreadcrumb separator="/">
-        <ElBreadcrumbItem :to="{ path: '/container/cluster' }">集群管理</ElBreadcrumbItem>
-        <ElBreadcrumbItem>{{ pageTitle }}</ElBreadcrumbItem>
-      </ElBreadcrumb>
+      <div class="deploy-create-header__left">
+        <ElButton text class="deploy-create-back-btn" @click="goBack">
+          <ElIcon><ArrowLeft /></ElIcon>
+          <span>返回</span>
+        </ElButton>
+        <ElDivider direction="vertical" class="deploy-create-header-divider" />
+        <ElBreadcrumb separator="/">
+          <ElBreadcrumbItem :to="{ path: '/container/cluster' }">集群管理</ElBreadcrumbItem>
+          <ElBreadcrumbItem>{{ pageTitle }}</ElBreadcrumbItem>
+        </ElBreadcrumb>
+        <template v-if="hasPlanId && !isCopyMode">
+          <ElDivider direction="vertical" class="deploy-create-header-divider" />
+          <span class="deploy-create-status-label">状态:</span>
+          <ElTag :type="planStatusTagType" effect="light" size="small">{{ planStatusText }}</ElTag>
+        </template>
+      </div>
+      <div v-if="isDetailMode" class="deploy-create-header__right">
+        <ElButton v-ripple :disabled="!canStartDeploy" @click="startCurrentPlan">开始部署</ElButton>
+        <ElButton v-ripple @click="goEdit">编辑</ElButton>
+      </div>
     </div>
 
     <ElCard class="deploy-create-card">
@@ -19,7 +30,8 @@
             <StepBasic
               ref="stepBasicRef"
               :form="form"
-              :read-only="isDetailMode"
+              :read-only="isReadOnlyMode"
+              :lock-immutable-fields="lockImmutableFields"
               @update:form="form = $event"
             />
           </ElTabPane>
@@ -27,7 +39,8 @@
             <StepClusterConfig
               ref="stepClusterConfigRef"
               :form="form"
-              :read-only="isDetailMode"
+              :read-only="isReadOnlyMode"
+              :lock-immutable-fields="lockImmutableFields"
               @update:form="form = $event"
             />
           </ElTabPane>
@@ -35,7 +48,7 @@
             <StepNodes
               ref="stepNodesRef"
               :form="form"
-              :read-only="isDetailMode"
+              :read-only="isReadOnlyMode"
               @update:form="form = $event"
             />
           </ElTabPane>
@@ -43,7 +56,7 @@
             <StepConfirm
               ref="stepConfirmRef"
               :form="form"
-              :read-only="isDetailMode"
+              :read-only="isReadOnlyMode"
               @update:form="form = $event"
               @go-step="goToStep"
             />
@@ -52,11 +65,11 @@
       </div>
 
       <div class="deploy-create-footer">
-        <ElButton v-if="!isDetailMode && currentStep > 0" :disabled="stepping" @click="prevStep"
+        <ElButton v-if="!isReadOnlyMode && currentStep > 0" :disabled="stepping" @click="prevStep"
           >上一步</ElButton
         >
         <ElButton
-          v-if="!isDetailMode && currentStep < 3"
+          v-if="!isReadOnlyMode && currentStep < 3"
           type="primary"
           :loading="stepping"
           @click="nextStep"
@@ -64,12 +77,12 @@
         >
         <ElButton @click="goBack">{{ isDetailMode ? '返回列表' : '取消' }}</ElButton>
         <ElButton
-          v-if="!isDetailMode && currentStep === 3"
+          v-if="!isReadOnlyMode && currentStep === 3"
           type="primary"
           :loading="submitting"
           @click="onSubmit"
         >
-          确认提交
+          {{ isEditMode ? '确定修改' : '确认提交' }}
         </ElButton>
       </div>
     </ElCard>
@@ -79,7 +92,13 @@
 <script setup lang="ts">
   import { ArrowLeft } from '@element-plus/icons-vue'
   import { useRoute, useRouter } from 'vue-router'
-  import { fetchCreatePlan, fetchPlanWithResources } from '@/api/plan'
+  import {
+    fetchCreatePlan,
+    fetchPlan,
+    fetchPlanWithResources,
+    fetchStartPlan,
+    fetchUpdatePlan
+  } from '@/api/plan'
   import StepBasic from './steps/StepBasic.vue'
   import StepNodes from './steps/StepNodes.vue'
   import StepClusterConfig from './steps/StepClusterConfig.vue'
@@ -94,8 +113,20 @@
   const router = useRouter()
 
   const currentPlanId = computed(() => Number(route.query.planId ?? 0))
-  const isDetailMode = computed(() => Number.isFinite(currentPlanId.value) && currentPlanId.value > 0)
-  const pageTitle = computed(() => (isDetailMode.value ? '部署详情' : '新建部署集群'))
+  const queryMode = computed(() => String(route.query.mode ?? ''))
+  const hasPlanId = computed(() => Number.isFinite(currentPlanId.value) && currentPlanId.value > 0)
+  const pageMode = computed(() => (queryMode.value ? queryMode.value : hasPlanId.value ? 'detail' : 'create'))
+  const isCreateMode = computed(() => !hasPlanId.value || pageMode.value === 'create')
+  const isCopyMode = computed(() => hasPlanId.value && pageMode.value === 'copy')
+  const isEditMode = computed(() => hasPlanId.value && pageMode.value === 'edit')
+  const isDetailMode = computed(() => hasPlanId.value && pageMode.value === 'detail')
+  const isReadOnlyMode = computed(() => isDetailMode.value)
+  const pageTitle = computed(() => {
+    if (isDetailMode.value) return '部署详情'
+    if (isEditMode.value) return '修改部署'
+    if (isCopyMode.value) return '拷贝部署'
+    return '新建部署集群'
+  })
 
   // activeTabName 是唯一状态源，currentStep 由它派生
   const activeTabName = ref('0')
@@ -103,6 +134,20 @@
 
   const stepping = ref(false)
   const submitting = ref(false)
+  const currentResourceVersion = ref(0)
+  const planStatusText = ref('未开始')
+
+  const planStatusTagType = computed(() => {
+    if (planStatusText.value === '运行中') return 'primary'
+    if (planStatusText.value === '已成功') return 'success'
+    if (planStatusText.value === '已失败') return 'danger'
+    return 'info'
+  })
+  const canStartDeploy = computed(() => Boolean(currentPlanId.value) && planStatusText.value !== '已成功')
+  const lockImmutableFields = computed(
+    () => isEditMode.value && planStatusText.value !== '未开始'
+  )
+  const shouldSubmitAsUpdate = computed(() => isEditMode.value)
 
   const stepBasicRef = ref<StepRef>(null)
   const stepClusterConfigRef = ref<StepRef>(null)
@@ -167,8 +212,10 @@
 
   async function loadPlanDetail(planId: number) {
     try {
-      const detail = await fetchPlanWithResources(planId)
+      const [detail, planMeta] = await Promise.all([fetchPlanWithResources(planId), fetchPlan(planId)])
+      planStatusText.value = planMeta.step || '未开始'
       const cfg = detail.config ?? {}
+      currentResourceVersion.value = Number(planMeta.resourceVersion ?? detail.resource_version ?? 0)
       const osImage = cfg.os_image ?? ''
       const highAvailability = Boolean((cfg.kubernetes as any)?.high_availability)
       const apiServerPortRaw = Number((cfg.network as any)?.api_server_port ?? (highAvailability ? 8443 : 6443))
@@ -193,15 +240,25 @@
         enablePrometheus: Boolean(cfg.component?.prometheus?.enabled),
         enableLogging: Boolean(cfg.component?.logging?.enabled)
       }
-      activeTabName.value = '3'
+      // 进入部署详情默认落在「集群信息」
+      activeTabName.value = '0'
     } catch (e: unknown) {
       const err = e as Error
       ElMessage.error(err.message || '加载部署详情失败')
     }
   }
 
+  async function ensureResourceVersion(planId: number) {
+    if (currentResourceVersion.value) return
+    const planMeta = await fetchPlan(planId)
+    currentResourceVersion.value = Number(planMeta.resourceVersion ?? 0)
+    if (!planStatusText.value || planStatusText.value === '未开始') {
+      planStatusText.value = planMeta.step || '未开始'
+    }
+  }
+
   function goToStep(step: number) {
-    if (!isDetailMode.value) activeTabName.value = String(step)
+    if (!isReadOnlyMode.value) activeTabName.value = String(step)
   }
 
   async function nextStep() {
@@ -223,80 +280,122 @@
   }
 
   function goBack() {
-    if (isDetailMode.value) {
+    if (isDetailMode.value || isEditMode.value || isCopyMode.value) {
       router.push('/container/plan')
     } else {
       router.push('/container/cluster')
     }
   }
 
+  function goEdit() {
+    if (!currentPlanId.value) return
+    router.push({
+      path: '/container/cluster/deploy',
+      query: { planId: String(currentPlanId.value), mode: 'edit' }
+    })
+  }
+
+  async function startCurrentPlan() {
+    if (!currentPlanId.value) return
+    try {
+      await ElMessageBox.confirm(`确定要启动计划 "${form.value.name || '-'}" 的部署任务吗？`, '启动部署', {
+        confirmButtonText: '启动',
+        cancelButtonText: '取消',
+        type: 'warning'
+      })
+      await fetchStartPlan(currentPlanId.value)
+      ElMessage.success(`计划 "${form.value.name || '-'}" 启动成功`)
+      await loadPlanDetail(currentPlanId.value)
+    } catch {}
+  }
+
+  function buildPlanPayload() {
+    const f = form.value
+    const nodes = f.nodes.map((n) => ({
+      name: n.name,
+      role: n.role as string[],
+      cri: f.runtime,
+      ip: n.ip,
+      auth:
+        n.authType === 'password'
+          ? { type: 'password' as const, password: { user: n.user, password: n.password } }
+          : { type: 'key' as const, key: { data: n.privateKey } }
+    }))
+
+    return {
+      name: f.name,
+      description: f.description,
+      config: {
+        os_image: f.osImage,
+        kubernetes: {
+          kubernetes_version: f.kubernetesVersion,
+          high_availability: f.highAvailability
+        },
+        network: {
+          network_interface: f.networkInterface,
+          cni: f.cni,
+          pod_network: f.podNetwork,
+          service_network: f.serviceNetwork,
+          api_server_address: f.apiServerAddress || undefined,
+          api_server_port: f.apiServerPort,
+          self_load_balance: f.selfLoadBalance,
+          kube_proxy_mode: f.kubeProxyMode
+        },
+        runtime: { runtime: f.runtime },
+        component: {
+          ...(f.enablePrometheus ? { prometheus: { enabled: true } } : {}),
+          ...(f.enableLogging ? { logging: { enabled: true } } : {})
+        }
+      },
+      nodes
+    }
+  }
+
   async function onSubmit() {
-    // 提交前逐步校验
-    for (let i = 0; i < 4; i++) {
-      const ref = getStepRef(i)
-      if (ref) {
-        const valid = await ref.validate()
-        if (!valid) {
-          activeTabName.value = String(i)
-          return
+    // 新建模式：提交前逐步校验；编辑模式：直接提交，由后端做最终校验
+    if (!isEditMode.value) {
+      for (let i = 0; i < 4; i++) {
+        const ref = getStepRef(i)
+        if (ref) {
+          const valid = await ref.validate()
+          if (!valid) {
+            activeTabName.value = String(i)
+            return
+          }
         }
       }
     }
 
     submitting.value = true
     try {
-      const f = form.value
-      const nodes = f.nodes.map((n) => ({
-        name: n.name,
-        role: n.role as string[],
-        cri: f.runtime,
-        ip: n.ip,
-        auth:
-          n.authType === 'password'
-            ? { type: 'password' as const, password: { user: n.user, password: n.password } }
-            : { type: 'key' as const, key: { data: n.privateKey } }
-      }))
-
-      await fetchCreatePlan({
-        name: f.name,
-        description: f.description,
-        config: {
-          os_image: f.osImage,
-          kubernetes: {
-            kubernetes_version: f.kubernetesVersion,
-            high_availability: f.highAvailability
-          },
-          network: {
-            network_interface: f.networkInterface,
-            cni: f.cni,
-            pod_network: f.podNetwork,
-            service_network: f.serviceNetwork,
-            api_server_address: f.apiServerAddress || undefined,
-            api_server_port: f.apiServerPort,
-            self_load_balance: f.selfLoadBalance,
-            kube_proxy_mode: f.kubeProxyMode
-          },
-          runtime: { runtime: f.runtime },
-          component: {
-            ...(f.enablePrometheus ? { prometheus: { enabled: true } } : {}),
-            ...(f.enableLogging ? { logging: { enabled: true } } : {})
-          }
-        },
-        nodes
-      })
-
-      ElMessage.success('部署集群创建成功，正在跳转...')
-      router.push('/container/cluster')
+      const payload = buildPlanPayload()
+      if (shouldSubmitAsUpdate.value) {
+        await ensureResourceVersion(currentPlanId.value)
+        if (!currentResourceVersion.value) {
+          ElMessage.error('缺少资源版本，无法修改，请重新进入页面后重试')
+          return
+        }
+        await fetchUpdatePlan(currentPlanId.value, {
+          ...payload,
+          resource_version: currentResourceVersion.value
+        })
+        ElMessage.success('部署修改成功')
+        router.push({ path: '/container/plan/detail', query: { planId: String(currentPlanId.value) } })
+      } else {
+        await fetchCreatePlan(payload)
+        ElMessage.success('部署集群创建成功，正在跳转...')
+        router.push('/container/cluster')
+      }
     } catch (e: unknown) {
       const err = e as Error
-      ElMessage.error(err.message || '创建失败，请重试')
+      ElMessage.error(err.message || (shouldSubmitAsUpdate.value ? '修改失败，请重试' : '创建失败，请重试'))
     } finally {
       submitting.value = false
     }
   }
 
   onMounted(() => {
-    if (isDetailMode.value) {
+    if (isDetailMode.value || isEditMode.value || isCopyMode.value) {
       void loadPlanDetail(currentPlanId.value)
     }
   })
@@ -310,9 +409,23 @@
   .deploy-create-header {
     display: flex;
     align-items: center;
-    gap: 0;
+    justify-content: space-between;
+    gap: 8px;
     margin-bottom: 12px;
     margin-left: -8px;
+  }
+
+  .deploy-create-header__left {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .deploy-create-header__right {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
   }
 
   .deploy-create-back-btn {
@@ -325,6 +438,11 @@
   .deploy-create-header-divider {
     margin: 0 12px;
     height: 16px;
+  }
+
+  .deploy-create-status-label {
+    font-size: 13px;
+    color: var(--el-text-color-secondary);
   }
 
   .deploy-create-card :deep(.el-card__body) {

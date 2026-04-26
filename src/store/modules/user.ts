@@ -43,6 +43,8 @@ import { resetRouterState } from '@/router/guards/beforeEach'
 import { useMenuStore } from './menu'
 import { StorageConfig } from '@/utils/storage/storage-config'
 
+const TOKEN_STORAGE_KEY = 'pixiu-access-token'
+
 /**
  * 用户状态管理
  * 管理用户登录状态、个人信息、语言设置、搜索历史、锁屏状态等
@@ -53,7 +55,7 @@ export const useUserStore = defineStore(
     // 语言设置
     const language = ref(LanguageEnum.ZH)
     // 登录状态
-    const isLogin = ref(false)
+    const isLogin = ref(Boolean(localStorage.getItem(TOKEN_STORAGE_KEY)))
     // 锁屏状态
     const isLock = ref(false)
     // 锁屏密码
@@ -63,7 +65,7 @@ export const useUserStore = defineStore(
     // 搜索历史记录
     const searchHistory = ref<AppRouteRecord[]>([])
     // 访问令牌
-    const accessToken = ref('')
+    const accessToken = ref(localStorage.getItem(TOKEN_STORAGE_KEY) || '')
     // 刷新令牌
     const refreshToken = ref('')
 
@@ -130,6 +132,11 @@ export const useUserStore = defineStore(
      */
     const setToken = (newAccessToken: string, newRefreshToken?: string) => {
       accessToken.value = newAccessToken
+      if (newAccessToken) {
+        localStorage.setItem(TOKEN_STORAGE_KEY, newAccessToken)
+      } else {
+        localStorage.removeItem(TOKEN_STORAGE_KEY)
+      }
       if (newRefreshToken) {
         refreshToken.value = newRefreshToken
       }
@@ -157,6 +164,7 @@ export const useUserStore = defineStore(
       lockPassword.value = ''
       // 清空访问令牌
       accessToken.value = ''
+      localStorage.removeItem(TOKEN_STORAGE_KEY)
       // 清空刷新令牌
       refreshToken.value = ''
       // 注意：不清空工作台标签页，等下次登录时根据用户判断

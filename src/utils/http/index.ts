@@ -64,8 +64,13 @@ const axiosInstance = axios.create({
 /** 请求拦截器 */
 axiosInstance.interceptors.request.use(
   (request: InternalAxiosRequestConfig) => {
-    const { accessToken } = useUserStore()
-    if (accessToken) request.headers.set('Authorization', `Bearer ${accessToken}`)
+    const userStore = useUserStore()
+    const token = userStore.accessToken || localStorage.getItem('pixiu-access-token') || ''
+    if (token && !userStore.accessToken) {
+      userStore.setToken(token)
+      userStore.setLoginStatus(true)
+    }
+    if (token) request.headers.set('Authorization', `Bearer ${token}`)
 
     if (request.data && !(request.data instanceof FormData) && !request.headers['Content-Type']) {
       request.headers.set('Content-Type', 'application/json')
