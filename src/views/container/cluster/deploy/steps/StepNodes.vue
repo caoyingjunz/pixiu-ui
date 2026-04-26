@@ -2,8 +2,7 @@
   <div class="step-nodes">
     <div class="nodes-toolbar">
       <div class="nodes-toolbar__left">
-        <ElButton type="primary" :disabled="readOnly" @click="openAddDialog">添加节点</ElButton>
-        <span class="nodes-tip">至少需要 1 个 master 节点</span>
+        <ElButton v-ripple :disabled="readOnly" @click="openAddDialog">添加节点</ElButton>
       </div>
       <div class="nodes-toolbar__filters">
         <ElInput
@@ -15,17 +14,39 @@
       </div>
     </div>
 
-    <ElTable :data="filteredNodes" border stripe class="nodes-table">
+    <ElTable
+      :data="pagedNodes"
+      stripe
+      class="nodes-table"
+      @selection-change="handleSelectionChange"
+    >
+      <template #empty>
+        <div class="nodes-empty">
+          <span
+            >暂无节点，请点击
+            <ElLink
+              type="primary"
+              :underline="false"
+              style="font-size: 12px; vertical-align: baseline"
+              @click="openAddDialog"
+              >添加节点</ElLink
+            >
+            添加</span
+          >
+        </div>
+      </template>
+      <ElTableColumn type="selection" width="42" />
       <ElTableColumn label="节点名称" prop="name" min-width="140" />
       <ElTableColumn label="角色" min-width="140">
         <template #default="{ row }">
           <ElTag
             v-for="r in row.role"
             :key="r"
-            :type="r === 'master' ? 'primary' : 'info'"
+            :type="r === 'master' ? 'warning' : 'success'"
             size="small"
             class="role-tag"
-          >{{ r }}</ElTag>
+            >{{ r }}</ElTag
+          >
         </template>
       </ElTableColumn>
       <ElTableColumn label="IP 地址" prop="ip" min-width="160" />
@@ -36,17 +57,36 @@
       </ElTableColumn>
       <ElTableColumn label="操作" width="120" fixed="right">
         <template #default="{ row, $index }">
-          <ElButton link type="primary" :disabled="readOnly" @click="openEditDialog(row, $index)">编辑</ElButton>
-          <ElButton link type="danger" :disabled="readOnly" @click="removeNode($index)">删除</ElButton>
+          <ElLink
+            type="primary"
+            :underline="false"
+            :disabled="readOnly"
+            style="font-size: 12px; margin-right: 12px"
+            @click="openEditDialog(row, pageOffset + $index)"
+            >编辑</ElLink
+          >
+          <ElLink
+            type="danger"
+            :underline="false"
+            :disabled="readOnly"
+            style="font-size: 12px"
+            @click="removeNode(pageOffset + $index)"
+            >删除</ElLink
+          >
         </template>
       </ElTableColumn>
     </ElTable>
 
-    <div v-if="form.nodes.length === 0" class="nodes-empty">
-      <ElIcon size="40" color="var(--el-text-color-placeholder)"><UserFilled /></ElIcon>
-      <p>暂无节点，请点击"添加节点"添加</p>
+    <div class="nodes-pagination">
+      <ElPagination
+        v-model:current-page="currentPage"
+        v-model:page-size="pageSize"
+        :total="filteredNodes.length"
+        :page-sizes="[10, 20, 50]"
+        layout="total, sizes, prev, pager, next, jumper"
+        background
+      />
     </div>
-    <div v-else class="nodes-footer">共 {{ filteredNodes.length }} 条</div>
 
     <!-- 新增/编辑节点对话框 -->
     <ElDialog
@@ -55,6 +95,7 @@
       width="540px"
       align-center
       destroy-on-close
+      :lock-scroll="false"
       class="node-form-dialog"
       @closed="handleDialogClosed"
     >
@@ -67,7 +108,7 @@
         class="node-form"
       >
         <ElFormItem label="节点名称" prop="name">
-          <ElInput v-model="nodeForm.name" placeholder="如 master-01" clearable />
+          <ElInput v-model="nodeForm.name" clearable />
         </ElFormItem>
         <ElFormItem label="节点角色" prop="role">
           <ElCheckboxGroup v-model="nodeForm.role" class="node-role-group">
@@ -76,7 +117,7 @@
           </ElCheckboxGroup>
         </ElFormItem>
         <ElFormItem label="IP 地址" prop="ip">
-          <ElInput v-model="nodeForm.ip" placeholder="192.168.1.100" clearable />
+          <ElInput v-model="nodeForm.ip" clearable />
         </ElFormItem>
         <ElFormItem label="认证方式" prop="authType">
           <ElRadioGroup v-model="nodeForm.authType" class="node-auth-group">
@@ -84,17 +125,12 @@
             <ElRadio value="key">密钥</ElRadio>
           </ElRadioGroup>
         </ElFormItem>
+        <ElFormItem label="用户名">
+          <span style="color: var(--el-text-color-regular)">root</span>
+        </ElFormItem>
         <template v-if="nodeForm.authType === 'password'">
-          <ElFormItem label="用户名" prop="user">
-            <ElInput v-model="nodeForm.user" placeholder="root" clearable />
-          </ElFormItem>
           <ElFormItem label="密码" prop="password">
-            <ElInput
-              v-model="nodeForm.password"
-              type="password"
-              placeholder="请输入 SSH 密码"
-              show-password
-            />
+            <ElInput v-model="nodeForm.password" type="password" show-password />
           </ElFormItem>
         </template>
         <template v-else>
@@ -120,15 +156,14 @@
 
 <script setup lang="ts">
   import type { FormInstance, FormRules } from 'element-plus'
-  import { UserFilled } from '@element-plus/icons-vue'
+  import { ElLink } from 'element-plus'
   import type { DeployClusterForm, NodeConfig } from './StepBasic.vue'
 
   defineOptions({ name: 'StepNodes' })
 
-  const props = withDefaults(
-    defineProps<{ form: DeployClusterForm; readOnly?: boolean }>(),
-    { readOnly: false }
-  )
+  const props = withDefaults(defineProps<{ form: DeployClusterForm; readOnly?: boolean }>(), {
+    readOnly: false
+  })
   const emit = defineEmits<{ 'update:form': [DeployClusterForm] }>()
   const readOnly = computed(() => props.readOnly)
 
@@ -148,6 +183,9 @@
 
   const nodeForm = reactive<NodeConfig>(emptyNode())
   const searchForm = reactive<{ name: string }>({ name: '' })
+  const currentPage = ref(1)
+  const pageSize = ref(10)
+
   const filteredNodes = computed(() => {
     const keyword = searchForm.name.trim().toLowerCase()
     return props.form.nodes.filter((n) => {
@@ -155,6 +193,16 @@
       return nameMatch
     })
   })
+
+  const pageOffset = computed(() => (currentPage.value - 1) * pageSize.value)
+  const pagedNodes = computed(() =>
+    filteredNodes.value.slice(pageOffset.value, pageOffset.value + pageSize.value)
+  )
+
+  const selectedNodes = ref<NodeConfig[]>([])
+  function handleSelectionChange(rows: NodeConfig[]) {
+    selectedNodes.value = rows
+  }
 
   const ipPattern = /^(\d{1,3}\.){3}\d{1,3}$/
 
@@ -179,22 +227,9 @@
         trigger: 'blur'
       }
     ],
-    user: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
     password: [{ required: true, message: '请输入密码', trigger: 'blur' }],
     privateKey: [{ required: true, message: '请粘贴私钥内容', trigger: 'blur' }]
   }
-
-  // 动态调整 user/password/privateKey 的必填性
-  const activeRules = computed<FormRules>(() => {
-    const base = { ...nodeRules }
-    if (nodeForm.authType === 'password') {
-      base.privateKey = []
-    } else {
-      base.user = []
-      base.password = []
-    }
-    return base
-  })
 
   function openAddDialog() {
     if (readOnly.value) return
@@ -222,21 +257,37 @@
   async function submitNode() {
     if (readOnly.value) return
     if (!nodeFormRef.value) return
-    // 使用动态规则校验
     const valid = await nodeFormRef.value
       .validate()
       .then(() => true)
       .catch(() => false)
     if (!valid) return
 
-    const node: NodeConfig = { ...nodeForm, role: [...nodeForm.role] }
-    const nodes = [...props.form.nodes]
-    if (editIndex.value >= 0) {
-      nodes[editIndex.value] = node
-    } else {
-      nodes.push(node)
+    const nodes = props.form.nodes
+    const isEdit = editIndex.value >= 0
+
+    const dupName = nodes.find(
+      (n, i) => n.name === nodeForm.name && (!isEdit || i !== editIndex.value)
+    )
+    if (dupName) {
+      ElMessage.warning(`节点名称 "${nodeForm.name}" 已存在，请修改后重试`)
+      return
     }
-    emit('update:form', { ...props.form, nodes })
+
+    const dupIp = nodes.find((n, i) => n.ip === nodeForm.ip && (!isEdit || i !== editIndex.value))
+    if (dupIp) {
+      ElMessage.warning(`IP 地址 "${nodeForm.ip}" 已存在，请修改后重试`)
+      return
+    }
+
+    const node: NodeConfig = { ...nodeForm, role: [...nodeForm.role] }
+    const updated = [...nodes]
+    if (isEdit) {
+      updated[editIndex.value] = node
+    } else {
+      updated.push(node)
+    }
+    emit('update:form', { ...props.form, nodes: updated })
     dialogVisible.value = false
   }
 
@@ -293,11 +344,6 @@
     width: 220px;
   }
 
-  .nodes-tip {
-    font-size: 12px;
-    color: var(--el-text-color-secondary);
-  }
-
   .nodes-table {
     width: 100%;
   }
@@ -312,22 +358,17 @@
 
   .nodes-empty {
     display: flex;
-    flex-direction: column;
     align-items: center;
-    padding: 48px 0 24px;
+    justify-content: center;
+    height: 48px;
     color: var(--el-text-color-placeholder);
-    font-size: 13px;
-  }
-
-  .nodes-empty p {
-    margin-top: 12px;
-  }
-
-  .nodes-footer {
-    margin-top: 12px;
-    text-align: right;
     font-size: 12px;
-    color: var(--el-text-color-secondary);
+  }
+
+  .nodes-pagination {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 12px;
   }
 
   .key-textarea :deep(textarea) {
@@ -363,7 +404,7 @@
   }
 
   .node-form-dialog :deep(.el-dialog__body) {
-    padding: 4px 20px 6px;
+    padding: 4px 52px 6px !important;
   }
 
   .node-form-dialog :deep(.el-dialog__footer) {
@@ -432,7 +473,8 @@
     color: var(--el-text-color-regular);
   }
 
-  .node-form-dialog :deep(.el-form-item.is-required:not(.is-no-asterisk) > .el-form-item__label:before) {
+  .node-form-dialog
+    :deep(.el-form-item.is-required:not(.is-no-asterisk) > .el-form-item__label:before) {
     margin-right: 4px;
   }
 
