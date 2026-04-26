@@ -28,7 +28,7 @@
         allow-create
         default-first-option
         :reserve-keyword="false"
-        :disabled="readOnly"
+        :disabled="readOnly || lockImmutableFields"
         @update:model-value="emit('update:form', { ...form, kubernetesVersion: $event })"
       >
         <ElOption v-for="v in k8sVersions" :key="v" :label="v" :value="v" />
@@ -106,7 +106,7 @@
         :model-value="form.cni"
         placeholder="请选择 CNI 插件"
         style="width: 240px"
-        :disabled="readOnly"
+        :disabled="readOnly || lockImmutableFields"
         @update:model-value="emit('update:form', { ...form, cni: $event })"
       >
         <ElOption label="Calico" value="calico" />
@@ -122,7 +122,7 @@
             :model-value="podParts[0]"
             class="cidr-first"
             maxlength="3"
-            :disabled="readOnly"
+            :disabled="readOnly || lockImmutableFields"
             @update:model-value="onPodPartChange(0, $event)"
           />
           <span class="ip-dot">.</span>
@@ -130,7 +130,7 @@
             :model-value="podParts[1]"
             class="cidr-second"
             maxlength="3"
-            :disabled="readOnly || !canEditPodPart(1)"
+            :disabled="readOnly || lockImmutableFields || !canEditPodPart(1)"
             @update:model-value="onPodPartChange(1, $event)"
           />
           <span class="ip-dot">.</span>
@@ -138,7 +138,7 @@
             :model-value="podParts[2]"
             class="cidr-fixed"
             maxlength="3"
-            :disabled="readOnly || !canEditPodPart(2)"
+            :disabled="readOnly || lockImmutableFields || !canEditPodPart(2)"
             @update:model-value="onPodPartChange(2, $event)"
           />
           <span class="ip-dot">.</span>
@@ -147,7 +147,7 @@
           <ElSelect
             :model-value="podMask"
             class="cidr-mask"
-            :disabled="readOnly"
+            :disabled="readOnly || lockImmutableFields"
             @update:model-value="onPodMaskChange"
           >
             <ElOption v-for="m in podMaskOptions" :key="m" :label="String(m)" :value="m" />
@@ -164,7 +164,7 @@
             :model-value="svcParts[0]"
             class="ip-part"
             maxlength="3"
-            :disabled="readOnly"
+            :disabled="readOnly || lockImmutableFields"
             @update:model-value="onSvcPartChange(0, $event)"
           />
           <span class="ip-dot">.</span>
@@ -172,7 +172,7 @@
             :model-value="svcParts[1]"
             class="ip-part"
             maxlength="3"
-            :disabled="readOnly || !canEditSvcPart(1)"
+            :disabled="readOnly || lockImmutableFields || !canEditSvcPart(1)"
             @update:model-value="onSvcPartChange(1, $event)"
           />
           <span class="ip-dot">.</span>
@@ -180,7 +180,7 @@
             :model-value="svcParts[2]"
             class="ip-part"
             maxlength="3"
-            :disabled="readOnly || !canEditSvcPart(2)"
+            :disabled="readOnly || lockImmutableFields || !canEditSvcPart(2)"
             @update:model-value="onSvcPartChange(2, $event)"
           />
           <span class="ip-dot">.</span>
@@ -189,7 +189,7 @@
           <ElSelect
             :model-value="svcMask"
             class="ip-mask"
-            :disabled="readOnly"
+            :disabled="readOnly || lockImmutableFields"
             @update:model-value="onSvcMaskChange"
           >
             <ElOption v-for="m in maskOptions" :key="m" :label="String(m)" :value="m" />
@@ -242,11 +242,16 @@
 
   defineOptions({ name: 'StepBasic' })
 
-  const props = withDefaults(defineProps<{ form: DeployClusterForm; readOnly?: boolean }>(), {
-    readOnly: false
-  })
+  const props = withDefaults(
+    defineProps<{ form: DeployClusterForm; readOnly?: boolean; lockImmutableFields?: boolean }>(),
+    {
+      readOnly: false,
+      lockImmutableFields: false
+    }
+  )
   const emit = defineEmits<{ 'update:form': [DeployClusterForm] }>()
   const readOnly = computed(() => props.readOnly)
+  const lockImmutableFields = computed(() => props.lockImmutableFields)
 
   const formRef = ref<FormInstance>()
 

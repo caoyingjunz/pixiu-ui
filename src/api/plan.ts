@@ -105,6 +105,7 @@ export interface PlanNodeDetail {
 
 export interface PlanResourcesDetail {
   id: number
+  resource_version?: number
   name: string
   description: string
   config?: {
@@ -225,4 +226,18 @@ export async function fetchCreatePlan(params: CreatePlanParams): Promise<void> {
   const res = await pixiuAxios.post('/pixiu/plans', params)
   const { code, message } = res.data
   if (code !== 200) throw new Error(message || '创建部署计划失败')
+}
+
+export interface UpdatePlanParams extends CreatePlanParams {
+  resource_version: number
+}
+
+/**
+ * PUT /pixiu/plans/:id
+ * 更新部署计划（含 config + nodes）
+ */
+export async function fetchUpdatePlan(id: number, params: UpdatePlanParams): Promise<void> {
+  const res = await pixiuAxios.put(`/pixiu/plans/${id}`, params)
+  const { code, message } = res.data
+  if (code !== 200) throw new Error(message || '更新部署计划失败')
 }

@@ -10,7 +10,7 @@
     <ElFormItem label="高可用 Kubernetes" prop="highAvailability">
       <ElSwitch
         :model-value="form.highAvailability"
-        :disabled="readOnly"
+        :disabled="readOnly || lockImmutableFields"
         @update:model-value="onHighAvailabilityChange"
       />
       <div class="form-tip form-tip--block">
@@ -31,7 +31,7 @@
       <ElInput
         :model-value="form.apiServerAddress"
         placeholder="kubernetes apiserver 的地址，非高可用可不填"
-        :disabled="readOnly"
+        :disabled="readOnly || lockImmutableFields"
         @update:model-value="emit('update:form', { ...form, apiServerAddress: $event })"
       />
       <div class="form-tip form-tip--block"
@@ -46,7 +46,7 @@
         :min="1"
         :max="65535"
         :precision="0"
-        :disabled="readOnly"
+        :disabled="readOnly || lockImmutableFields"
         controls-position="right"
         @update:model-value="
           emit('update:form', { ...form, apiServerPort: Number($event || 6443) })
@@ -81,12 +81,17 @@
 
   defineOptions({ name: 'StepClusterConfig' })
 
-  const props = withDefaults(defineProps<{ form: DeployClusterForm; readOnly?: boolean }>(), {
-    readOnly: false
-  })
+  const props = withDefaults(
+    defineProps<{ form: DeployClusterForm; readOnly?: boolean; lockImmutableFields?: boolean }>(),
+    {
+      readOnly: false,
+      lockImmutableFields: false
+    }
+  )
   const emit = defineEmits<{ 'update:form': [DeployClusterForm] }>()
   const form = computed(() => props.form)
   const readOnly = computed(() => props.readOnly)
+  const lockImmutableFields = computed(() => props.lockImmutableFields)
   const formRef = ref<FormInstance>()
 
   const rules: FormRules = {
@@ -131,6 +136,7 @@
   }
 
   function onHighAvailabilityChange(enabled: boolean | string | number) {
+    if (readOnly.value || lockImmutableFields.value) return
     const highAvailability = Boolean(enabled)
     emit('update:form', {
       ...props.form,

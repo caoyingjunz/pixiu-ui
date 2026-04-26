@@ -292,8 +292,15 @@
                 () => '查看进度'
               ),
               h(ArtButtonMore, {
-                list: [{ key: 'delete', label: '删除', icon: 'ri:delete-bin-line' }],
+                list: [
+                  { key: 'edit', label: '编辑', icon: 'ri:edit-2-line' },
+                  { key: 'delete', label: '删除', icon: 'ri:delete-bin-line' }
+                ],
                 onClick: (item: ButtonMoreItem) => {
+                  if (item.key === 'edit') {
+                    goToEdit(row)
+                    return
+                  }
                   if (item.key === 'delete') deletePlan(row)
                 }
               })
@@ -334,9 +341,16 @@
     router.push({ path: '/container/cluster/deploy', query: { planId: String(row.id) } })
   }
 
+  function goToEdit(row: PlanItemFormatted) {
+    router.push({
+      path: '/container/cluster/deploy',
+      query: { planId: String(row.id), mode: 'edit' }
+    })
+  }
+
   async function startPlan(row: PlanItemFormatted) {
     try {
-      await ElMessageBox.confirm(`确定要启动计划 "${row.name}" 的部署任务吗？`, '启动部署', {
+      await ElMessageBox.confirm(`确定要启动计划 "${row.name}" 的部署任务吗？`, '开始部署', {
         confirmButtonText: '启动',
         cancelButtonText: '取消',
         type: 'warning'
