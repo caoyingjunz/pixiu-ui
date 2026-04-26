@@ -205,14 +205,21 @@ function handleLoginStatus(
   userStore: ReturnType<typeof useUserStore>,
   next: NavigationGuardNext
 ): boolean {
+  const cachedToken = localStorage.getItem('pixiu-access-token') || ''
+  if (cachedToken && !userStore.accessToken) {
+    userStore.setToken(cachedToken)
+  }
+
   // 某些场景（如持久化恢复时序）可能出现 isLogin 短暂失真；
   // 只要 token 仍存在，即恢复为已登录状态，避免误触发强制登出。
   if (!userStore.isLogin && userStore.accessToken) {
     userStore.setLoginStatus(true)
   }
 
+  const hasToken = Boolean(userStore.accessToken || cachedToken)
+
   // 已登录或访问登录页或静态路由，直接放行
-  if (userStore.isLogin || to.path === RoutesAlias.Login || isStaticRoute(to.path)) {
+  if (hasToken || to.path === RoutesAlias.Login || isStaticRoute(to.path)) {
     return true
   }
 
