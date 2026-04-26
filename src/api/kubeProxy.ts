@@ -9,6 +9,6 @@ export const kubeProxyAxios = axios.create({
 
 kubeProxyAxios.interceptors.request.use((config) => {
   const { accessToken } = useUserStore()
-  if (accessToken) config.headers.set('Authorization', accessToken)
+  if (accessToken) config.headers.set('Authorization', `Bearer ${accessToken}`)
   return config
 })

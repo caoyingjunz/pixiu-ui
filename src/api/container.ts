@@ -47,7 +47,7 @@ export const pixiuAxios = axios.create({
 
 pixiuAxios.interceptors.request.use((config) => {
   const { accessToken } = useUserStore()
-  if (accessToken) config.headers.set('Authorization', accessToken)
+  if (accessToken) config.headers.set('Authorization', `Bearer ${accessToken}`)
   return config
 })
 
@@ -186,7 +186,7 @@ export async function fetchPingCluster(kube_config: string): Promise<void> {
 export async function fetchDeleteCluster(id: number): Promise<void> {
   const { accessToken } = useUserStore()
   const res = await pixiuAxios.delete(`/pixiu/clusters/${id}`, {
-    headers: accessToken ? { Authorization: accessToken } : {}
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {}
   })
   const { code, message } = res.data
   if (code !== 200) throw new Error(message || '删除失败')

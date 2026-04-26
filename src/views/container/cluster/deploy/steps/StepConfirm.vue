@@ -101,6 +101,40 @@
         </div>
       </div>
     </section>
+    <section class="confirm-panel">
+      <div class="panel-header">
+        <div class="panel-title-wrap">
+          <h3 class="panel-title">节点信息</h3>
+          <span class="panel-subtitle">确认节点列表与认证配置</span>
+        </div>
+        <ElButton v-if="!readOnly" link type="primary" @click="emit('go-step', 2)">编辑</ElButton>
+      </div>
+      <div v-if="form.nodes.length === 0" class="nodes-empty-tip">暂无节点</div>
+      <ElTable v-else :data="form.nodes" stripe size="small" class="confirm-nodes-table">
+        <ElTableColumn label="节点名称" prop="name" min-width="120" />
+        <ElTableColumn label="角色" min-width="120">
+          <template #default="{ row }">
+            <ElTag
+              v-for="r in row.role"
+              :key="r"
+              :type="r === 'master' ? 'warning' : 'success'"
+              size="small"
+              style="margin-right: 4px"
+              >{{ r }}</ElTag
+            >
+          </template>
+        </ElTableColumn>
+        <ElTableColumn label="IP 地址" prop="ip" min-width="140" />
+        <ElTableColumn label="认证方式" min-width="90">
+          <template #default="{ row }">
+            {{ row.authType === 'password' ? '密码' : '密钥' }}
+          </template>
+        </ElTableColumn>
+        <ElTableColumn label="用户名" min-width="80">
+          <template #default>root</template>
+        </ElTableColumn>
+      </ElTable>
+    </section>
   </div>
 </template>
 
@@ -109,10 +143,9 @@
 
   defineOptions({ name: 'StepConfirm' })
 
-  const props = withDefaults(
-    defineProps<{ form: DeployClusterForm; readOnly?: boolean }>(),
-    { readOnly: false }
-  )
+  const props = withDefaults(defineProps<{ form: DeployClusterForm; readOnly?: boolean }>(), {
+    readOnly: false
+  })
   const emit = defineEmits<{
     'update:form': [DeployClusterForm]
     'go-step': [number]
@@ -196,5 +229,14 @@
 
   .mono {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+  .nodes-empty-tip {
+    font-size: 13px;
+    color: var(--el-text-color-placeholder);
+    padding: 12px 0;
+  }
+
+  .confirm-nodes-table {
+    width: 100%;
   }
 </style>

@@ -205,13 +205,18 @@ function handleLoginStatus(
   userStore: ReturnType<typeof useUserStore>,
   next: NavigationGuardNext
 ): boolean {
+  // 某些场景（如持久化恢复时序）可能出现 isLogin 短暂失真；
+  // 只要 token 仍存在，即恢复为已登录状态，避免误触发强制登出。
+  if (!userStore.isLogin && userStore.accessToken) {
+    userStore.setLoginStatus(true)
+  }
+
   // 已登录或访问登录页或静态路由，直接放行
   if (userStore.isLogin || to.path === RoutesAlias.Login || isStaticRoute(to.path)) {
     return true
   }
 
   // 未登录且访问需要权限的页面，跳转到登录页并携带 redirect 参数
-  userStore.logOut()
   next({
     name: 'Login',
     query: { redirect: to.fullPath }
