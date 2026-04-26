@@ -53,16 +53,30 @@
     <ElDrawer
       v-model="taskDrawerVisible"
       title="部署进度"
-      size="45%"
+      size="52%"
       :destroy-on-close="true"
-      @open="loadTasks"
+      class="plan-task-drawer"
+      @open="handleTaskDrawerOpen"
+      @close="handleTaskDrawerClose"
     >
       <div class="task-drawer">
-        <div class="task-drawer-toolbar">
-          <ElButton size="small" :loading="tasksLoading" @click="loadTasks">刷新</ElButton>
-        </div>
-        <ElTable :data="tasks" border size="small" style="margin-top: 12px">
-          <ElTableColumn label="任务名称" prop="name" min-width="160" />
+        <ElAlert
+          title="获取部署计划的部署情况"
+          type="info"
+          :closable="false"
+          show-icon
+          effect="light"
+          class="task-alert"
+        />
+        <ElTable
+          :data="tasks"
+          :border="false"
+          :stripe="false"
+          size="small"
+          style="margin-top: 12px"
+          :header-cell-style="{ background: 'transparent' }"
+        >
+          <ElTableColumn label="名称" prop="name" min-width="160" />
           <ElTableColumn label="状态" width="130">
             <template #default="{ row }">
               <div class="task-status">
@@ -85,8 +99,10 @@
           <ElTableColumn label="开始时间" prop="gmt_create" min-width="160">
             <template #default="{ row }">{{ formatDate(row.gmt_create) }}</template>
           </ElTableColumn>
-          <ElTableColumn label="更新时间" prop="gmt_modified" min-width="160">
-            <template #default="{ row }">{{ formatDate(row.gmt_modified) }}</template>
+          <ElTableColumn label="结束时间" prop="gmt_modified" min-width="160">
+            <template #default="{ row }">
+              {{ row.status === '运行中' || row.status === '未开始' ? '-' : formatDate(row.gmt_modified) }}
+            </template>
           </ElTableColumn>
         </ElTable>
         <div v-if="tasks.length === 0 && !tasksLoading" class="task-empty">暂无部署任务</div>
@@ -140,6 +156,7 @@
   const currentPlan = ref<PlanItemFormatted | null>(null)
   const tasks = ref<PlanTask[]>([])
   const tasksLoading = ref(false)
+  const taskPollingTimer = ref<ReturnType<typeof setInterval> | null>(null)
 
   const {
     columns,
@@ -272,7 +289,7 @@
                   style: 'font-size:12px',
                   onClick: () => openTaskDrawer(row)
                 },
-                () => '进度'
+                () => '查看进度'
               ),
               h(ArtButtonMore, {
                 list: [{ key: 'delete', label: '删除', icon: 'ri:delete-bin-line' }],
@@ -349,21 +366,51 @@
     taskDrawerVisible.value = true
   }
 
-  async function loadTasks() {
+  function startTaskPolling() {
+    stopTaskPolling()
+    taskPollingTimer.value = setInterval(() => {
+      void loadTasks(true)
+    }, 5000)
+  }
+
+  function stopTaskPolling() {
+    if (!taskPollingTimer.value) return
+    clearInterval(taskPollingTimer.value)
+    taskPollingTimer.value = null
+  }
+
+  function handleTaskDrawerOpen() {
+    void loadTasks(true)
+    startTaskPolling()
+  }
+
+  function handleTaskDrawerClose() {
+    stopTaskPolling()
+  }
+
+  async function loadTasks(silent: boolean = false) {
     if (!currentPlan.value) return
-    tasksLoading.value = true
+    if (!silent) {
+      tasksLoading.value = true
+    }
     try {
       tasks.value = await fetchPlanTasks(currentPlan.value.id)
     } catch (e: any) {
       ElMessage.error(e.message || '获取任务列表失败')
     } finally {
-      tasksLoading.value = false
+      if (!silent) {
+        tasksLoading.value = false
+      }
     }
   }
 
   function handleSelectionChange(rows: PlanItemFormatted[]) {
     selectedRows.value = rows
   }
+
+  onBeforeUnmount(() => {
+    stopTaskPolling()
+  })
 </script>
 
 <style>
@@ -402,11 +449,12 @@
 
   .task-drawer {
     padding: 4px 0;
+    overflow: hidden;
   }
 
-  .task-drawer-toolbar {
-    display: flex;
-    justify-content: flex-end;
+  .task-alert {
+    margin-top: 0px;
+    margin-bottom: 12px;
   }
 
   .task-status {
@@ -421,5 +469,18 @@
     padding: 40px 0;
     color: var(--el-text-color-placeholder);
     font-size: 13px;
+  }
+
+  .plan-task-drawer :deep(.el-drawer__body) {
+    overflow: auto;
+  }
+
+  .plan-task-drawer :deep(.el-table__header-wrapper th.el-table__cell) {
+    font-size: 13px;
+  }
+
+  .plan-task-drawer :deep(.el-drawer.rtl) {
+    height: 82vh;
+    margin-top: 9vh;
   }
 </style>
