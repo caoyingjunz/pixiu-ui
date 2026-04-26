@@ -1,6 +1,18 @@
 import axios from 'axios'
 import { useUserStore } from '@/store/modules/user'
 
+const TOKEN_STORAGE_KEY = 'pixiu-access-token'
+
+function resolveAccessToken(): string {
+  const userStore = useUserStore()
+  const token = userStore.accessToken || localStorage.getItem(TOKEN_STORAGE_KEY) || ''
+  if (token && !userStore.accessToken) {
+    userStore.setToken(token)
+    userStore.setLoginStatus(true)
+  }
+  return token
+}
+
 /** 直连 `/pixiu/proxy/...` 的 K8s API，响应体为原生 JSON（非 { code, result }） */
 export const kubeProxyAxios = axios.create({
   baseURL: '/',
@@ -8,7 +20,7 @@ export const kubeProxyAxios = axios.create({
 })
 
 kubeProxyAxios.interceptors.request.use((config) => {
-  const { accessToken } = useUserStore()
-  if (accessToken) config.headers.set('Authorization', `Bearer ${accessToken}`)
+  const token = resolveAccessToken()
+  if (token) config.headers.set('Authorization', `Bearer ${token}`)
   return config
 })

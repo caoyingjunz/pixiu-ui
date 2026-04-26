@@ -1,6 +1,18 @@
 import axios from 'axios'
 import { useUserStore } from '@/store/modules/user'
 
+const TOKEN_STORAGE_KEY = 'pixiu-access-token'
+
+function resolveAccessToken(): string {
+  const userStore = useUserStore()
+  const token = userStore.accessToken || localStorage.getItem(TOKEN_STORAGE_KEY) || ''
+  if (token && !userStore.accessToken) {
+    userStore.setToken(token)
+    userStore.setLoginStatus(true)
+  }
+  return token
+}
+
 /** 后端集群状态枚举 */
 export type ClusterStatus = 0 | 1 | 2 | 3 | 4
 
@@ -46,8 +58,8 @@ export const pixiuAxios = axios.create({
 })
 
 pixiuAxios.interceptors.request.use((config) => {
-  const { accessToken } = useUserStore()
-  if (accessToken) config.headers.set('Authorization', `Bearer ${accessToken}`)
+  const token = resolveAccessToken()
+  if (token) config.headers.set('Authorization', `Bearer ${token}`)
   return config
 })
 
@@ -184,9 +196,9 @@ export async function fetchPingCluster(kube_config: string): Promise<void> {
 
 /** 删除集群 */
 export async function fetchDeleteCluster(id: number): Promise<void> {
-  const { accessToken } = useUserStore()
+  const token = resolveAccessToken()
   const res = await pixiuAxios.delete(`/pixiu/clusters/${id}`, {
-    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {}
+    headers: token ? { Authorization: `Bearer ${token}` } : {}
   })
   const { code, message } = res.data
   if (code !== 200) throw new Error(message || '删除失败')

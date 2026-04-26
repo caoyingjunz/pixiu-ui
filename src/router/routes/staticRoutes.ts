@@ -37,10 +37,6 @@ export const staticRoutes: AppRouteRecordRaw[] = [
     meta: { title: 'menus.forgetPassword.title', isHideTab: true }
   },
   {
-    path: '/:pathMatch(.*)*',
-    redirect: '/auth/login'
-  },
-  {
     path: '/outside',
     component: () => import('@views/index/index.vue'),
     name: 'Outside',
