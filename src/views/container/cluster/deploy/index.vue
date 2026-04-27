@@ -385,8 +385,7 @@
         router.push({ path: '/container/cluster/deploy', query: { planId: String(currentPlanId.value) } })
       } else {
         await fetchCreatePlan(payload)
-        ElMessage.success('部署集群创建成功，正在跳转...')
-        router.push('/container/cluster')
+        ElMessage.success('部署集群创建成功')
       }
     } catch (e: unknown) {
       const err = e as Error

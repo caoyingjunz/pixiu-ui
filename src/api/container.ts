@@ -24,6 +24,7 @@ interface BackendCluster {
   alias_name: string
   status: ClusterStatus
   cluster_type: number
+  plan_id: number
   kubernetes_version: string
   nodes: { ready: string[]; not_ready: string[] }
   protected: boolean
@@ -44,6 +45,8 @@ export interface ClusterItem {
   status: ClusterStatus
   /** 0 导入集群，1 部署集群（与后端 cluster_type 一致） */
   clusterType: number
+  /** 自建集群关联的部署计划 ID */
+  planId: number
   nodeReady: number
   nodeNotReady: number
   nodeCount: number
@@ -90,6 +93,7 @@ function toClusterItem(c: BackendCluster): ClusterItem {
     version: c.kubernetes_version || '-',
     status: c.status,
     clusterType: c.cluster_type ?? 0,
+    planId: c.plan_id ?? 0,
     nodeReady,
     nodeNotReady,
     nodeCount: nodeReady + nodeNotReady,
