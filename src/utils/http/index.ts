@@ -20,13 +20,14 @@ import { ApiStatus } from './status'
 import { HttpError, handleError, showError, showSuccess } from './error'
 import { $t } from '@/locales'
 import { BaseResponse } from '@/types'
+import { router } from '@/router'
 
 /** 请求配置常量 */
 const REQUEST_TIMEOUT = 15000
-const LOGOUT_DELAY = 500
 const MAX_RETRIES = 0
 const RETRY_DELAY = 1000
 const UNAUTHORIZED_DEBOUNCE_TIME = 3000
+const UNAUTHORIZED_PATH = '/exception/401'
 
 /** 401防抖状态 */
 let isUnauthorizedErrorShown = false
@@ -110,15 +111,18 @@ function handleUnauthorizedError(message?: string): never {
 
   if (!isUnauthorizedErrorShown) {
     isUnauthorizedErrorShown = true
-    logOut()
+    redirectToUnauthorizedPage()
 
     unauthorizedTimer = setTimeout(resetUnauthorizedError, UNAUTHORIZED_DEBOUNCE_TIME)
-
-    showError(error, true)
     throw error
   }
 
   throw error
+}
+
+function redirectToUnauthorizedPage() {
+  if (router.currentRoute.value.path === UNAUTHORIZED_PATH) return
+  router.push({ path: UNAUTHORIZED_PATH }).catch(() => undefined)
 }
 
 /** 重置401防抖状态 */
@@ -126,13 +130,6 @@ function resetUnauthorizedError() {
   isUnauthorizedErrorShown = false
   if (unauthorizedTimer) clearTimeout(unauthorizedTimer)
   unauthorizedTimer = null
-}
-
-/** 退出登录函数 */
-function logOut() {
-  setTimeout(() => {
-    useUserStore().logOut()
-  }, LOGOUT_DELAY)
 }
 
 /** 是否需要重试 */

@@ -11,11 +11,11 @@ export const systemRoutes: AppRouteRecord = {
   },
   children: [
     {
-      path: 'user2',
-      name: 'User2',
-      component: '/system/user2',
+      path: 'user',
+      name: 'User',
+      component: '/system/user',
       meta: {
-        title: 'menus.system.user2',
+        title: 'menus.system.user',
         icon: 'ri:user-line',
         keepAlive: true,
         roles: ['R_SUPER', 'R_ADMIN']

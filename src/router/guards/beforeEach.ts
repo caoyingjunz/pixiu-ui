@@ -365,7 +365,7 @@ async function handleDynamicRoutes(
     // 关闭 loading
     closeLoading()
 
-    // 401 错误：axios 拦截器已处理退出登录，取消当前导航
+    // 401 错误：axios 拦截器会跳转 401 页面，这里取消当前导航
     if (isUnauthorizedError(error)) {
       // 重置状态，允许重新登录后再次初始化
       routeInitInProgress = false
