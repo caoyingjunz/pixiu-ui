@@ -442,6 +442,14 @@
   function handleSelectionChange(rows: ClusterItem[]) {
     selectedRows.value = rows
   }
+
+  onMounted(() => {
+    refreshData()
+  })
+
+  onActivated(() => {
+    refreshData()
+  })
 </script>
 
 <!-- 非 scoped：icon-action hover 效果需穿透子组件渲染的 DOM -->

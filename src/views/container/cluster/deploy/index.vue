@@ -134,7 +134,7 @@
 
   const stepping = ref(false)
   const submitting = ref(false)
-  const currentResourceVersion = ref(0)
+  const currentResourceVersion = ref<number | null>(null)
   const planStatusText = ref('未开始')
 
   const planStatusTagType = computed(() => {
@@ -215,7 +215,8 @@
       const [detail, planMeta] = await Promise.all([fetchPlanWithResources(planId), fetchPlan(planId)])
       planStatusText.value = planMeta.step || '未开始'
       const cfg = detail.config ?? {}
-      currentResourceVersion.value = Number(planMeta.resourceVersion ?? detail.resource_version ?? 0)
+      const rv = planMeta.resourceVersion ?? detail.resource_version
+      currentResourceVersion.value = rv == null ? null : Number(rv)
       const osImage = cfg.os_image ?? ''
       const highAvailability = Boolean((cfg.kubernetes as any)?.high_availability)
       const apiServerPortRaw = Number((cfg.network as any)?.api_server_port ?? (highAvailability ? 8443 : 6443))
@@ -249,9 +250,10 @@
   }
 
   async function ensureResourceVersion(planId: number) {
-    if (currentResourceVersion.value) return
+    if (currentResourceVersion.value != null) return
     const planMeta = await fetchPlan(planId)
-    currentResourceVersion.value = Number(planMeta.resourceVersion ?? 0)
+    const rv = planMeta.resourceVersion
+    currentResourceVersion.value = rv == null ? null : Number(rv)
     if (!planStatusText.value || planStatusText.value === '未开始') {
       planStatusText.value = planMeta.step || '未开始'
     }
@@ -371,7 +373,7 @@
       const payload = buildPlanPayload()
       if (shouldSubmitAsUpdate.value) {
         await ensureResourceVersion(currentPlanId.value)
-        if (!currentResourceVersion.value) {
+        if (currentResourceVersion.value == null) {
           ElMessage.error('缺少资源版本，无法修改，请重新进入页面后重试')
           return
         }
@@ -380,7 +382,7 @@
           resource_version: currentResourceVersion.value
         })
         ElMessage.success('部署修改成功')
-        router.push({ path: '/container/plan/detail', query: { planId: String(currentPlanId.value) } })
+        router.push({ path: '/container/cluster/deploy', query: { planId: String(currentPlanId.value) } })
       } else {
         await fetchCreatePlan(payload)
         ElMessage.success('部署集群创建成功，正在跳转...')
