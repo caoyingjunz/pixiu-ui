@@ -45,6 +45,66 @@
 
     <ClusterMonitor v-model="monitorVisible" :cluster="monitorCluster" />
 
+    <!-- 自建集群部署进度抽屉 -->
+    <ElDrawer
+      v-model="taskDrawerVisible"
+      title="部署进度"
+      size="52%"
+      :destroy-on-close="true"
+      class="plan-task-drawer"
+      @open="handleTaskDrawerOpen"
+      @close="handleTaskDrawerClose"
+    >
+      <div class="task-drawer">
+        <ElAlert
+          title="获取部署计划的部署情况"
+          type="info"
+          :closable="false"
+          show-icon
+          effect="light"
+          class="task-alert"
+        />
+        <ElTable
+          :data="tasks"
+          :border="false"
+          :stripe="false"
+          size="small"
+          style="margin-top: 12px"
+          :header-cell-style="{ background: 'transparent' }"
+        >
+          <ElTableColumn label="名称" prop="name" min-width="160" />
+          <ElTableColumn label="状态" width="130">
+            <template #default="{ row }">
+              <div class="task-status">
+                <ElIcon v-if="row.status === '运行中'" class="is-loading" color="var(--el-color-primary)">
+                  <LoadingIcon />
+                </ElIcon>
+                <ElIcon v-else-if="row.status === '已成功'" color="var(--el-color-success)">
+                  <SuccessFilled />
+                </ElIcon>
+                <ElIcon v-else-if="row.status === '已失败'" color="var(--el-color-danger)">
+                  <CircleCloseFilled />
+                </ElIcon>
+                <ElIcon v-else color="var(--el-text-color-placeholder)">
+                  <RemoveFilled />
+                </ElIcon>
+                <span>{{ row.status }}</span>
+              </div>
+            </template>
+          </ElTableColumn>
+          <ElTableColumn label="开始时间" prop="gmt_create" min-width="160">
+            <template #default="{ row }">{{ formatDate(row.gmt_create) }}</template>
+          </ElTableColumn>
+          <ElTableColumn label="结束时间" prop="gmt_modified" min-width="160">
+            <template #default="{ row }">
+              {{ row.status === '运行中' || row.status === '未开始' ? '-' : formatDate(row.gmt_modified) }}
+            </template>
+          </ElTableColumn>
+        </ElTable>
+        <div v-if="tasks.length === 0 && !tasksLoading" class="task-empty">暂无部署任务</div>
+      </div>
+    </ElDrawer>
+
     <!-- 编辑集群名称对话框 -->
     <ElDialog
       v-model="renameVisible"
@@ -74,8 +134,24 @@
 </template>
 
 <script setup lang="ts">
-  import { ElIcon, ElLink, ElMessage, ElMessageBox, ElSwitch, ElTag, ElTooltip } from 'element-plus'
-  import { CopyDocument, Edit, InfoFilled } from '@element-plus/icons-vue'
+  import {
+    ElIcon,
+    ElLink,
+    ElMessage,
+    ElMessageBox,
+    ElSwitch,
+    ElTag,
+    ElTooltip
+  } from 'element-plus'
+  import {
+    CopyDocument,
+    Edit,
+    InfoFilled,
+    SuccessFilled,
+    CircleCloseFilled,
+    Loading as LoadingIcon,
+    RemoveFilled
+  } from '@element-plus/icons-vue'
   import ArtButtonMore, {
     type ButtonMoreItem
   } from '@/components/core/forms/art-button-more/index.vue'
@@ -90,7 +166,9 @@
     fetchUpdateClusterAlias,
     fetchProtectCluster
   } from '@/api/container'
+  import { fetchPlanTasks } from '@/api/plan'
   import type { ClusterItem } from '@/api/container'
+  import type { PlanTask } from '@/api/plan'
 
   defineOptions({ name: 'Cluster' })
 
@@ -103,6 +181,7 @@
 
   /** 集群详情 - 概览页「API Server」标签（与 overview 内 overviewTab=api 一致） */
   function goToClusterApiServer(row: ClusterItem) {
+    if (isCustomClusterNotRunning(row)) return
     router.push({
       path: '/container/overview',
       query: { cluster: row.name, overviewTab: 'api' }
@@ -133,6 +212,26 @@
   const newAliasName = ref('')
   const renameError = ref('')
   const renameLoading = ref(false)
+  const taskDrawerVisible = ref(false)
+  const currentTaskCluster = ref<ClusterItem | null>(null)
+  const tasks = ref<PlanTask[]>([])
+  const tasksLoading = ref(false)
+  const taskPollingTimer = ref<ReturnType<typeof setInterval> | null>(null)
+
+  function formatDate(iso: string): string {
+    if (!iso) return '-'
+    const d = new Date(iso)
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+  }
+
+  function isCustomClusterNotRunning(row: ClusterItem): boolean {
+    return Number(row.clusterType) === 1 && Number(row.status) !== 0
+  }
+
+  function shouldShowDeployProgress(row: ClusterItem): boolean {
+    return isCustomClusterNotRunning(row)
+  }
 
   const {
     columns,
@@ -175,17 +274,26 @@
           formatter: (row: ClusterItem) =>
             h('div', { style: 'line-height:1.8' }, [
               h('div', { style: 'display:flex;align-items:center;gap:4px' }, [
-                h(
-                  ElLink,
-                  {
-                    type: 'primary',
-                    underline: 'never',
-                    style: 'font-size:14px',
-                    onClick: () =>
-                      router.push({ path: '/container/overview', query: clusterDetailQuery(row) })
-                  },
-                  () => row.aliasName
-                ),
+                isCustomClusterNotRunning(row)
+                  ? h(
+                      'span',
+                      {
+                        style:
+                          'font-size:14px;color:var(--el-color-primary);cursor:not-allowed'
+                      },
+                      row.aliasName
+                    )
+                  : h(
+                      ElLink,
+                      {
+                        type: 'primary',
+                        underline: 'never',
+                        style: 'font-size:14px',
+                        onClick: () =>
+                          router.push({ path: '/container/overview', query: clusterDetailQuery(row) })
+                      },
+                      () => row.aliasName
+                    ),
                 h(
                   'span',
                   {
@@ -261,9 +369,25 @@
         {
           prop: 'status',
           label: '状态',
+          width: 120,
           formatter: (row: ClusterItem) => {
             const cfg = STATUS_CONFIG[row.status] ?? { type: 'info' as const, text: '未知' }
-            return h(ElTag, { type: cfg.type }, () => cfg.text)
+            return h('div', { style: 'display:flex;flex-direction:column;align-items:flex-start;gap:4px' }, [
+              h(ElTag, { type: cfg.type }, () => cfg.text),
+              ...(shouldShowDeployProgress(row)
+                ? [
+                    h(
+                      'span',
+                      {
+                        style:
+                          'font-size:12px;color:var(--el-color-primary);cursor:pointer;white-space:nowrap;line-height:1;margin-left:10px',
+                        onClick: () => openTaskDrawer(row)
+                      },
+                      '查看进度'
+                    )
+                  ]
+                : [])
+            ])
           }
         },
         {
@@ -339,7 +463,7 @@
                 {
                   type: 'primary',
                   underline: 'never',
-                  style: 'font-size:12px',
+                  style: `font-size:12px;${isCustomClusterNotRunning(row) ? 'cursor:not-allowed;color:var(--el-text-color-disabled)' : ''}`,
                   onClick: () => goToClusterApiServer(row)
                 },
                 () => '查看集群凭证'
@@ -356,8 +480,18 @@
               ),
               h(ArtButtonMore, {
                 list: [
-                  { key: 'alert', label: '配置告警', icon: 'ri:alarm-warning-line' },
-                  { key: 'logs', label: '采集日志', icon: 'ri:file-list-3-line' }
+                  {
+                    key: 'alert',
+                    label: '配置告警',
+                    icon: 'ri:alarm-warning-line',
+                    disabled: isCustomClusterNotRunning(row)
+                  },
+                  {
+                    key: 'logs',
+                    label: '采集日志',
+                    icon: 'ri:file-list-3-line',
+                    disabled: isCustomClusterNotRunning(row)
+                  }
                 ],
                 onClick: (item: ButtonMoreItem) => clusterMoreClick(item, row)
               })
@@ -377,6 +511,7 @@
   }
 
   function clusterMoreClick(item: ButtonMoreItem, row: ClusterItem) {
+    if (isCustomClusterNotRunning(row)) return
     switch (item.key) {
       case 'alert':
         openClusterTab(row, 'alert')
@@ -442,6 +577,62 @@
   function handleSelectionChange(rows: ClusterItem[]) {
     selectedRows.value = rows
   }
+
+  function openTaskDrawer(row: ClusterItem) {
+    if (!row.planId) {
+      ElMessage.warning('当前集群缺少关联的部署计划')
+      return
+    }
+    currentTaskCluster.value = row
+    tasks.value = []
+    taskDrawerVisible.value = true
+  }
+
+  function startTaskPolling() {
+    stopTaskPolling()
+    taskPollingTimer.value = setInterval(() => {
+      void loadTasks(true)
+    }, 5000)
+  }
+
+  function stopTaskPolling() {
+    if (!taskPollingTimer.value) return
+    clearInterval(taskPollingTimer.value)
+    taskPollingTimer.value = null
+  }
+
+  function handleTaskDrawerOpen() {
+    void loadTasks(true)
+    startTaskPolling()
+  }
+
+  function handleTaskDrawerClose() {
+    stopTaskPolling()
+  }
+
+  async function loadTasks(silent: boolean = false) {
+    if (!currentTaskCluster.value?.planId) return
+    if (!silent) tasksLoading.value = true
+    try {
+      tasks.value = await fetchPlanTasks(currentTaskCluster.value.planId)
+    } catch (e: any) {
+      ElMessage.error(e.message || '获取任务列表失败')
+    } finally {
+      if (!silent) tasksLoading.value = false
+    }
+  }
+
+  onMounted(() => {
+    refreshData()
+  })
+
+  onActivated(() => {
+    refreshData()
+  })
+
+  onBeforeUnmount(() => {
+    stopTaskPolling()
+  })
 </script>
 
 <!-- 非 scoped：icon-action hover 效果需穿透子组件渲染的 DOM -->
@@ -476,6 +667,43 @@
 
   .cluster-type-header-tooltip-inner > div + div {
     margin-top: 8px;
+  }
+
+  .task-drawer {
+    padding: 4px 0;
+    overflow: hidden;
+  }
+
+  .task-alert {
+    margin-top: 0;
+    margin-bottom: 12px;
+  }
+
+  .task-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+  }
+
+  .task-empty {
+    text-align: center;
+    padding: 40px 0;
+    color: var(--el-text-color-placeholder);
+    font-size: 13px;
+  }
+
+  .plan-task-drawer :deep(.el-drawer__body) {
+    overflow: auto;
+  }
+
+  .plan-task-drawer :deep(.el-table__header-wrapper th.el-table__cell) {
+    font-size: 13px;
+  }
+
+  .plan-task-drawer :deep(.el-drawer.rtl) {
+    height: 82vh;
+    margin-top: 9vh;
   }
 </style>
 

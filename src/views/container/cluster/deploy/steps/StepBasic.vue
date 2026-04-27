@@ -9,10 +9,10 @@
   >
     <ElDivider content-position="left" class="section-divider-top">基础配置</ElDivider>
 
-    <ElFormItem label="集群名称" prop="name">
+    <ElFormItem label="部署名称" prop="name">
       <ElInput
         :model-value="form.name"
-        placeholder="请输入集群名称，2-64个字符"
+        placeholder="请输入部署名称"
         clearable
         :disabled="readOnly"
         @update:model-value="emit('update:form', { ...form, name: $event })"
@@ -394,15 +394,7 @@
   }
 
   const rules: FormRules = {
-    name: [
-      { required: true, message: '请输入集群名称', trigger: 'blur' },
-      { min: 2, max: 64, message: '长度 2～64 个字符', trigger: 'blur' },
-      {
-        pattern: /^[a-z][a-z0-9-]*$/,
-        message: '只允许小写字母、数字和连字符，且以字母开头',
-        trigger: 'blur'
-      }
-    ],
+    name: [{ required: true, message: '请输入集群名称', trigger: 'blur' }],
     kubernetesVersion: [{ required: true, message: '请选择 Kubernetes 版本', trigger: 'change' }],
     runtime: [{ required: true, message: '请选择容器运行时', trigger: 'change' }],
     osType: [{ required: true, message: '请选择操作系统', trigger: 'change' }],

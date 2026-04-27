@@ -434,6 +434,10 @@
     selectedRows.value = rows
   }
 
+  onActivated(() => {
+    refreshData()
+  })
+
   onBeforeUnmount(() => {
     stopTaskPolling()
   })
