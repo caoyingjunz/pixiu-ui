@@ -373,7 +373,18 @@
           formatter: (row: ClusterItem) => {
             const cfg = STATUS_CONFIG[row.status] ?? { type: 'info' as const, text: '未知' }
             return h('div', { style: 'display:flex;flex-direction:column;align-items:flex-start;gap:4px' }, [
-              h(ElTag, { type: cfg.type }, () => cfg.text),
+              h('div', { style: 'display:flex;align-items:center;gap:4px' }, [
+                h(ElTag, { type: cfg.type }, () => cfg.text),
+                ...(Number(row.status) === 1
+                  ? [
+                      h(
+                        ElIcon,
+                        { class: 'is-loading', color: 'var(--el-color-primary)' },
+                        () => h(LoadingIcon)
+                      )
+                    ]
+                  : [])
+              ]),
               ...(shouldShowDeployProgress(row)
                 ? [
                     h(
