@@ -37,6 +37,12 @@ export const staticRoutes: AppRouteRecordRaw[] = [
     meta: { title: 'menus.forgetPassword.title', isHideTab: true }
   },
   {
+    path: '/exception/401',
+    name: 'Exception401',
+    component: () => import('@views/exception/401.vue'),
+    meta: { title: '401', isHideTab: true }
+  },
+  {
     path: '/outside',
     component: () => import('@views/index/index.vue'),
     name: 'Outside',

@@ -293,6 +293,7 @@
     patchK8sNode,
     type K8sNode
   } from '@/api/kubernetes/node'
+  import { fetchClusterByName } from '@/api/container'
   import { deleteK8sEvent, fetchKubeRawEventList } from '@/api/kubernetes/events'
   import { fetchNodeUsageMetrics } from '@/api/kubernetes/metrics'
   import {
@@ -800,10 +801,32 @@
     privateKey: [{ required: true, message: '请粘贴私钥内容', trigger: 'blur' }]
   }
 
-  function openAddNodeDialog() {
-    editNodeIndex.value = -1
-    resetAddNodeForm()
-    addNodeDialogVisible.value = true
+  async function openAddNodeDialog() {
+    const clusterName = String(route.query.cluster ?? '').trim()
+    if (!clusterName) {
+      ElMessage.warning('未获取到集群信息')
+      return
+    }
+
+    try {
+      const cluster = await fetchClusterByName(clusterName)
+      const clusterType = cluster?.clusterType
+
+      if (clusterType === 0) {
+        ElMessage.warning('非自建集群不支持添加节点')
+        return
+      }
+
+      if (clusterType === 1) {
+        ElMessage.info('功能开发中，敬请期待')
+        return
+      }
+
+      ElMessage.warning('未识别的集群类型，暂不支持添加节点')
+    } catch (error) {
+      console.error('[Nodes] 获取集群类型失败:', error)
+      ElMessage.error('获取集群类型失败，请稍后重试')
+    }
   }
 
   function openEditNodeDialog(index: number) {

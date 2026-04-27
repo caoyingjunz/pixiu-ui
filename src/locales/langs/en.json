@@ -229,7 +229,7 @@
     },
     "system": {
       "title": "System Settings",
-      "user2": "User Manage",
+      "user": "User Manage",
       "role": "Role Manage",
       "userCenter": "User Center",
       "menu": "Menu Manage"
