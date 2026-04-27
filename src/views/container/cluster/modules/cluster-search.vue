@@ -45,6 +45,7 @@
       type: 'select',
       props: {
         placeholder: '请选择状态',
+        clearable: true,
         options: [
           { label: '运行中', value: '0' },
           { label: '部署中', value: '1' },
