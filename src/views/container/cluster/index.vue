@@ -178,7 +178,8 @@
     fetchUpdateClusterAlias,
     fetchProtectCluster
   } from '@/api/container'
-  import { fetchPlanTasks } from '@/api/plan'
+  import { fetchDestroyPlan, fetchPlanTasks } from '@/api/plan'
+  import { confirmDestroyPlan } from '../utils/destroy-plan-dialog'
   import type { ClusterItem } from '@/api/container'
   import type { PlanTask } from '@/api/plan'
 
@@ -535,6 +536,12 @@
                     label: '采集日志',
                     icon: 'ri:file-list-3-line',
                     disabled: isCustomClusterNotRunning(row)
+                  },
+                  {
+                    key: 'destroy',
+                    label: '销毁',
+                    icon: 'ri:delete-back-2-line',
+                    disabled: Number(row.clusterType) !== 1 || !row.planId
                   }
                 ],
                 onClick: (item: ButtonMoreItem) => clusterMoreClick(item, row)
@@ -555,15 +562,37 @@
   }
 
   function clusterMoreClick(item: ButtonMoreItem, row: ClusterItem) {
-    if (isCustomClusterNotRunning(row)) return
     switch (item.key) {
       case 'alert':
+        if (isCustomClusterNotRunning(row)) return
         openClusterTab(row, 'alert')
         break
       case 'logs':
+        if (isCustomClusterNotRunning(row)) return
         openClusterTab(row, 'logs')
         break
+      case 'destroy':
+        if (Number(row.clusterType) !== 1) return
+        if (!row.planId) {
+          ElMessage.warning('当前集群缺少关联的部署计划')
+          return
+        }
+        void destroyPlan(row.planId, row.aliasName || row.name)
+        break
     }
+  }
+
+  async function destroyPlan(planId: number, planName: string) {
+    const restart = await confirmDestroyPlan(planName, {
+      title: '销毁集群',
+      messageBuilder: (name: string) => `确定要销毁集群 "${name}" 吗？`
+    })
+    if (restart === null) return
+    try {
+      await fetchDestroyPlan(planId, restart)
+      ElMessage.success('销毁任务已提交')
+      refreshData()
+    } catch {}
   }
 
   function openRenameDialog(row: ClusterItem) {
@@ -750,6 +779,10 @@
     margin-top: 9vh;
   }
 
+
+  .destroy-plan-dialog .el-message-box__message {
+    padding-top: 2px;
+  }
   .task-log-dialog .el-message-box__message {
     white-space: pre-wrap;
     word-break: break-word;

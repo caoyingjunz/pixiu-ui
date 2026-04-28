@@ -208,6 +208,16 @@ export async function fetchStartPlan(id: number): Promise<void> {
 }
 
 /**
+ * POST /pixiu/plans/:id/destroy
+ * 销毁部署任务
+ */
+export async function fetchDestroyPlan(id: number, restart: boolean = false): Promise<void> {
+  const res = await pixiuAxios.post(`/pixiu/plans/${id}/destroy`, { restart })
+  const { code, message } = res.data
+  if (code !== 200) throw new Error(message || '销毁失败')
+}
+
+/**
  * GET /pixiu/plans/:id/tasks
  * 查询部署任务列表
  */
