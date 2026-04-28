@@ -104,6 +104,18 @@
               {{ row.status === '运行中' || row.status === '未开始' ? '-' : formatDate(row.gmt_modified) }}
             </template>
           </ElTableColumn>
+          <ElTableColumn label="操作" width="88" fixed="right" align="center">
+            <template #default="{ row }">
+              <ElLink
+                type="primary"
+                underline="never"
+                :style="taskLogLinkStyle(row)"
+                @click="onTaskLogClick(row)"
+              >
+                日志
+              </ElLink>
+            </template>
+          </ElTableColumn>
         </ElTable>
         <div v-if="tasks.length === 0 && !tasksLoading" class="task-empty">暂无部署任务</div>
       </div>
@@ -142,6 +154,27 @@
     const d = new Date(iso)
     const pad = (n: number) => String(n).padStart(2, '0')
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+  }
+
+  function isTaskLogDisabled(row: PlanTask): boolean {
+    return row.status === '未开始'
+  }
+
+  function taskLogLinkStyle(row: PlanTask): string {
+    const base = 'font-size:12px'
+    if (isTaskLogDisabled(row)) {
+      return `${base};cursor:not-allowed;color:var(--el-text-color-disabled)`
+    }
+    return base
+  }
+
+  function onTaskLogClick(row: PlanTask) {
+    if (isTaskLogDisabled(row)) return
+    const text = row.message?.trim() ? row.message : '暂无日志'
+    ElMessageBox.alert(text, '任务日志', {
+      confirmButtonText: '确定',
+      customClass: 'task-log-dialog'
+    })
   }
 
   // 搜索
@@ -456,6 +489,14 @@
   }
   .plan-page .art-table .el-table th.el-table__cell {
     font-size: 13px;
+  }
+
+  .task-log-dialog .el-message-box__message {
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 60vh;
+    overflow: auto;
+    text-align: left;
   }
 </style>
 
