@@ -141,8 +141,10 @@
     fetchPlanList,
     fetchDeletePlan,
     fetchStartPlan,
-    fetchPlanTasks
+    fetchPlanTasks,
+    fetchDestroyPlan
   } from '@/api/plan'
+  import { confirmDestroyPlan } from '../utils/destroy-plan-dialog'
   import type { PlanItemFormatted, PlanTask } from '@/api/plan'
 
   defineOptions({ name: 'Plan' })
@@ -328,6 +330,7 @@
                 list: [
                   { key: 'copy', label: '拷贝', icon: 'ri:file-copy-2-line' },
                   { key: 'edit', label: '编辑', icon: 'ri:edit-2-line' },
+                  { key: 'destroy', label: '销毁', icon: 'ri:delete-back-2-line' },
                   { key: 'delete', label: '删除', icon: 'ri:delete-bin-line' }
                 ],
                 onClick: (item: ButtonMoreItem) => {
@@ -337,6 +340,10 @@
                   }
                   if (item.key === 'edit') {
                     goToEdit(row)
+                    return
+                  }
+                  if (item.key === 'destroy') {
+                    void destroyPlan(row.id, row.name)
                     return
                   }
                   if (item.key === 'delete') deletePlan(row)
@@ -419,6 +426,16 @@
     } catch {}
   }
 
+  async function destroyPlan(planId: number, planName: string) {
+    const restart = await confirmDestroyPlan(planName)
+    if (restart === null) return
+    try {
+      await fetchDestroyPlan(planId, restart)
+      ElMessage.success('销毁任务已提交')
+      refreshData()
+    } catch {}
+  }
+
   function openTaskDrawer(row: PlanItemFormatted) {
     currentPlan.value = row
     tasks.value = []
@@ -491,6 +508,10 @@
     font-size: 13px;
   }
 
+
+  .destroy-plan-dialog .el-message-box__message {
+    padding-top: 2px;
+  }
   .task-log-dialog .el-message-box__message {
     white-space: pre-wrap;
     word-break: break-word;
