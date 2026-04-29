@@ -53,7 +53,7 @@
     <ElDrawer
       v-model="taskDrawerVisible"
       title="部署进度"
-      size="52%"
+      size="48%"
       :destroy-on-close="true"
       class="plan-task-drawer"
       @open="handleTaskDrawerOpen"
@@ -80,7 +80,11 @@
           <ElTableColumn label="状态" width="130">
             <template #default="{ row }">
               <div class="task-status">
-                <ElIcon v-if="row.status === '运行中'" class="is-loading" color="var(--el-color-primary)">
+                <ElIcon
+                  v-if="row.status === '运行中'"
+                  class="is-loading"
+                  color="var(--el-color-primary)"
+                >
                   <Loading />
                 </ElIcon>
                 <ElIcon v-else-if="row.status === '已成功'" color="var(--el-color-success)">
@@ -101,7 +105,11 @@
           </ElTableColumn>
           <ElTableColumn label="结束时间" prop="gmt_modified" min-width="160">
             <template #default="{ row }">
-              {{ row.status === '运行中' || row.status === '未开始' ? '-' : formatDate(row.gmt_modified) }}
+              {{
+                row.status === '运行中' || row.status === '未开始'
+                  ? '-'
+                  : formatDate(row.gmt_modified)
+              }}
             </template>
           </ElTableColumn>
           <ElTableColumn label="操作" width="88" fixed="right" align="center">
@@ -118,6 +126,27 @@
           </ElTableColumn>
         </ElTable>
         <div v-if="tasks.length === 0 && !tasksLoading" class="task-empty">暂无部署任务</div>
+      </div>
+    </ElDrawer>
+
+    <!-- 日志流抽屉 -->
+    <ElDrawer
+      v-model="logDialogVisible"
+      :title="`日志查询 — ${logTask?.name || ''}`"
+      size="48%"
+      destroy-on-close
+      class="task-log-drawer"
+      @close="stopLogStream"
+    >
+      <div ref="logPanelRef" class="log-panel">
+        <pre
+          v-for="(line, i) in logLines"
+          :key="i"
+          :class="['log-line', getLogLineClass(line)]"
+          v-html="renderAnsiLine(line)"
+        />
+        <div v-if="logLines.length === 0 && !logStreaming" class="log-empty">暂无日志</div>
+        <div v-if="logStreaming" class="log-cursor">▌</div>
       </div>
     </ElDrawer>
   </div>
@@ -172,11 +201,189 @@
 
   function onTaskLogClick(row: PlanTask) {
     if (isTaskLogDisabled(row)) return
-    const text = row.message?.trim() ? row.message : '暂无日志'
-    ElMessageBox.alert(text, '任务日志', {
-      confirmButtonText: '确定',
-      customClass: 'task-log-dialog'
-    })
+    logTask.value = row
+    logLines.value = []
+    logDialogVisible.value = true
+    void startLogStream(currentPlan.value!.id, row.id)
+  }
+
+  // ---- 日志流 ----
+  const logDialogVisible = ref(false)
+  const logTask = ref<PlanTask | null>(null)
+  const logLines = ref<string[]>([])
+  const logStreaming = ref(false)
+  const logAbortController = ref<AbortController | null>(null)
+  const logPanelRef = ref<HTMLElement | null>(null)
+
+  function scrollLogToBottom() {
+    if (logPanelRef.value) {
+      logPanelRef.value.scrollTop = logPanelRef.value.scrollHeight
+    }
+  }
+
+  async function startLogStream(planId: number, taskId: number) {
+    const token = localStorage.getItem('pixiu-access-token') || ''
+    const ctrl = new AbortController()
+    logAbortController.value = ctrl
+    logStreaming.value = true
+    try {
+      const res = await fetch(`/pixiu/plans/${planId}/tasks/${taskId}/logs`, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: ctrl.signal
+      })
+      if (!res.ok || !res.body) {
+        logLines.value.push(`[错误] HTTP ${res.status}`)
+        return
+      }
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buf = ''
+      let firstChunk = true
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += decoder.decode(value, { stream: true })
+        // 首块：检查是否为业务错误 JSON（含 No such container）
+        if (firstChunk) {
+          firstChunk = false
+          try {
+            const parsed = JSON.parse(buf.trim())
+            if (parsed?.code !== 200 && String(parsed?.message).includes('No such container')) {
+              const fallback = logTask.value?.message?.trim()
+              logLines.value.push(fallback || '暂无日志')
+              return
+            }
+          } catch {
+            /* 不是 JSON，正常流式日志 */
+          }
+        }
+        const parts = buf.split('\n')
+        buf = parts.pop() ?? ''
+        for (const line of parts) {
+          logLines.value.push(line)
+        }
+        await nextTick()
+        scrollLogToBottom()
+      }
+      if (buf) logLines.value.push(buf)
+    } catch (e: any) {
+      if (e?.name !== 'AbortError') {
+        logLines.value.push(`[错误] ${e?.message || '连接断开'}`)
+      }
+    } finally {
+      logStreaming.value = false
+      logAbortController.value = null
+      await nextTick()
+      scrollLogToBottom()
+    }
+  }
+
+  function stopLogStream() {
+    logAbortController.value?.abort()
+    logAbortController.value = null
+    logStreaming.value = false
+  }
+
+  function getLogLineClass(line: string): string {
+    const text = line.toLowerCase()
+    if (text.includes('[error]') || text.includes('failed') || text.includes('fatal')) {
+      return 'log-line--error'
+    }
+    if (text.includes('[warning]') || text.includes('warn')) {
+      return 'log-line--warn'
+    }
+    if (text.includes('ok:') || text.startsWith('ok') || text.includes('success')) {
+      return 'log-line--success'
+    }
+    if (text.includes('task ') || text.startsWith('play ') || text.startsWith('recap')) {
+      return 'log-line--title'
+    }
+    return ''
+  }
+
+  const ansiCodeRegex = /\u001b\[([0-9;]*)m/g
+
+  function escapeHtml(input: string): string {
+    return input
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;')
+  }
+
+  function ansiCodeToClass(code: number): string | null {
+    const fgClassMap: Record<number, string> = {
+      30: 'ansi-fg-black',
+      31: 'ansi-fg-red',
+      32: 'ansi-fg-green',
+      33: 'ansi-fg-yellow',
+      34: 'ansi-fg-blue',
+      35: 'ansi-fg-magenta',
+      36: 'ansi-fg-cyan',
+      37: 'ansi-fg-white',
+      90: 'ansi-fg-bright-black',
+      91: 'ansi-fg-bright-red',
+      92: 'ansi-fg-bright-green',
+      93: 'ansi-fg-bright-yellow',
+      94: 'ansi-fg-bright-blue',
+      95: 'ansi-fg-bright-magenta',
+      96: 'ansi-fg-bright-cyan',
+      97: 'ansi-fg-bright-white'
+    }
+    return fgClassMap[code] || null
+  }
+
+  function renderAnsiLine(line: string): string {
+    let lastIndex = 0
+    let html = ''
+    let currentClass = ''
+
+    ansiCodeRegex.lastIndex = 0
+    let match = ansiCodeRegex.exec(line)
+
+    while (match) {
+      const textChunk = line.slice(lastIndex, match.index)
+      if (textChunk) {
+        const escaped = escapeHtml(textChunk)
+        html += currentClass ? `<span class="${currentClass}">${escaped}</span>` : escaped
+      }
+
+      const codes = match[1]
+        .split(';')
+        .map((n) => Number(n))
+        .filter((n) => !Number.isNaN(n))
+
+      for (const code of codes) {
+        if (code === 0) {
+          currentClass = ''
+          continue
+        }
+        if (code === 1) {
+          currentClass = currentClass ? `${currentClass} ansi-bold` : 'ansi-bold'
+          continue
+        }
+        const fgClass = ansiCodeToClass(code)
+        if (fgClass) {
+          const tokens = currentClass
+            .split(' ')
+            .filter((item) => item && !item.startsWith('ansi-fg-'))
+          tokens.push(fgClass)
+          currentClass = tokens.join(' ')
+        }
+      }
+
+      lastIndex = ansiCodeRegex.lastIndex
+      match = ansiCodeRegex.exec(line)
+    }
+
+    const tail = line.slice(lastIndex)
+    if (tail) {
+      const escapedTail = escapeHtml(tail)
+      html += currentClass ? `<span class="${currentClass}">${escapedTail}</span>` : escapedTail
+    }
+
+    return html || '&nbsp;'
   }
 
   // 搜索
@@ -241,7 +448,8 @@
                 'span',
                 {
                   class: 'plan-icon-action',
-                  style: 'cursor:pointer;color:var(--el-text-color-secondary);display:inline-flex;align-items:center',
+                  style:
+                    'cursor:pointer;color:var(--el-text-color-secondary);display:inline-flex;align-items:center',
                   title: '复制名称',
                   onClick: (e: MouseEvent) => {
                     e.stopPropagation()
@@ -259,10 +467,10 @@
           width: 100,
           formatter: (row: PlanItemFormatted) => {
             const map: Record<string, { type: 'info' | 'primary' | 'success' | 'danger' }> = {
-              '未开始': { type: 'info' },
-              '运行中': { type: 'primary' },
-              '已成功': { type: 'success' },
-              '已失败': { type: 'danger' }
+              未开始: { type: 'info' },
+              运行中: { type: 'primary' },
+              已成功: { type: 'success' },
+              已失败: { type: 'danger' }
             }
             const cfg = map[row.step] ?? { type: 'info' as const }
             return h(ElTag, { type: cfg.type }, () => row.step)
@@ -297,7 +505,11 @@
           minWidth: 200,
           showOverflowTooltip: true,
           formatter: (row: PlanItemFormatted) =>
-            h('span', { style: 'font-size:12px;color:var(--el-text-color-secondary)' }, row.description || '-')
+            h(
+              'span',
+              { style: 'font-size:12px;color:var(--el-text-color-secondary)' },
+              row.description || '-'
+            )
         },
         {
           prop: 'operation',
@@ -358,7 +570,8 @@
   // 前端过滤
   const filteredData = computed(() => {
     return data.value.filter((item) => {
-      const nameMatch = !appliedSearch.value || item.name.toLowerCase().includes(appliedSearch.value.toLowerCase())
+      const nameMatch =
+        !appliedSearch.value || item.name.toLowerCase().includes(appliedSearch.value.toLowerCase())
       const statusMatch = !appliedStatus.value || item.step === appliedStatus.value
       return nameMatch && statusMatch
     })
@@ -407,10 +620,16 @@
         cancelButtonText: '取消',
         type: 'warning'
       })
+    } catch {
+      return
+    }
+    try {
       await fetchStartPlan(row.id)
       ElMessage.success(`计划 "${row.name}" 启动成功`)
       refreshData()
-    } catch {}
+    } catch (e: any) {
+      ElMessage.error(e?.message || '启动失败')
+    }
   }
 
   async function deletePlan(row: PlanItemFormatted) {
@@ -490,6 +709,7 @@
 
   onBeforeUnmount(() => {
     stopTaskPolling()
+    stopLogStream()
   })
 </script>
 
@@ -508,7 +728,6 @@
     font-size: 13px;
   }
 
-
   .destroy-plan-dialog .el-message-box__message {
     padding-top: 2px;
   }
@@ -518,6 +737,16 @@
     max-height: 60vh;
     overflow: auto;
     text-align: left;
+  }
+  .task-log-drawer .el-drawer__body {
+    padding: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .task-log-drawer .el-drawer__header {
+    margin-bottom: 20px;
   }
 </style>
 
@@ -574,5 +803,135 @@
   .plan-task-drawer :deep(.el-drawer.rtl) {
     height: 82vh;
     margin-top: 9vh;
+  }
+
+  .log-panel {
+    background:
+      radial-gradient(circle at top right, rgb(101 144 255 / 16%) 0%, rgb(101 144 255 / 0%) 50%),
+      radial-gradient(circle at left bottom, rgb(80 215 255 / 10%) 0%, rgb(80 215 255 / 0%) 40%),
+      linear-gradient(180deg, #0f1727 0%, #0a1220 100%);
+    color: #dbe7ff;
+    font-family:
+      'JetBrains Mono', 'SF Mono', Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
+      monospace;
+    font-size: 12px;
+    line-height: 1.72;
+    letter-spacing: 0.15px;
+    padding: 30px 16px 16px 20px;
+    flex: 1;
+    overflow-y: auto;
+    border-top: 1px solid rgb(255 255 255 / 10%);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 4%),
+      inset 0 0 0 1px rgb(255 255 255 / 3%),
+      inset 0 -24px 40px rgb(0 0 0 / 18%);
+    text-rendering: optimizelegibility;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .log-line {
+    margin: 0;
+    padding: 1px 8px;
+    white-space: pre-wrap;
+    word-break: break-all;
+    border-radius: 4px;
+    color: #dbe7ff;
+  }
+
+  .log-line:nth-child(2n) {
+    color: #c6d6ff;
+  }
+
+  .log-line:hover {
+    background: rgb(115 147 255 / 12%);
+  }
+
+  .log-line--title {
+    color: #8bd5ff;
+    font-weight: 600;
+  }
+
+  .log-line--success {
+    color: #8ee7a8;
+  }
+
+  .log-line--warn {
+    color: #f5d089;
+  }
+
+  .log-line--error {
+    color: #ff9ea7;
+  }
+
+  .log-line :deep(.ansi-bold) {
+    font-weight: 700;
+  }
+
+  .log-line :deep(.ansi-fg-black) {
+    color: #667390;
+  }
+  .log-line :deep(.ansi-fg-red) {
+    color: #ff8a93;
+  }
+  .log-line :deep(.ansi-fg-green) {
+    color: #82e8a0;
+  }
+  .log-line :deep(.ansi-fg-yellow) {
+    color: #f8d078;
+  }
+  .log-line :deep(.ansi-fg-blue) {
+    color: #82aaff;
+  }
+  .log-line :deep(.ansi-fg-magenta) {
+    color: #d7a8ff;
+  }
+  .log-line :deep(.ansi-fg-cyan) {
+    color: #7fe7ff;
+  }
+  .log-line :deep(.ansi-fg-white) {
+    color: #dbe7ff;
+  }
+  .log-line :deep(.ansi-fg-bright-black) {
+    color: #8fa1c5;
+  }
+  .log-line :deep(.ansi-fg-bright-red) {
+    color: #ff9ea7;
+  }
+  .log-line :deep(.ansi-fg-bright-green) {
+    color: #93f0ae;
+  }
+  .log-line :deep(.ansi-fg-bright-yellow) {
+    color: #ffe08a;
+  }
+  .log-line :deep(.ansi-fg-bright-blue) {
+    color: #96b8ff;
+  }
+  .log-line :deep(.ansi-fg-bright-magenta) {
+    color: #e0b9ff;
+  }
+  .log-line :deep(.ansi-fg-bright-cyan) {
+    color: #96eeff;
+  }
+  .log-line :deep(.ansi-fg-bright-white) {
+    color: #f2f7ff;
+  }
+
+  .log-empty {
+    color: #8ea4d6;
+    font-size: 13px;
+    text-align: center;
+    padding-top: 200px;
+  }
+
+  .log-cursor {
+    display: inline-block;
+    color: var(--el-color-primary);
+    animation: blink 1s step-end infinite;
+  }
+
+  @keyframes blink {
+    50% {
+      opacity: 0;
+    }
   }
 </style>

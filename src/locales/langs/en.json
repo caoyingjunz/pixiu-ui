@@ -236,7 +236,8 @@
     },
     "safeguard": {
       "title": "Safeguard",
-      "audit": "Audit"
+      "audit": "Audit",
+      "agent": "Agent Management"
     },
     "plan": {
       "title": "Version Plan",

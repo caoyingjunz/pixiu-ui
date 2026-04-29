@@ -43,6 +43,18 @@ export const staticRoutes: AppRouteRecordRaw[] = [
     meta: { title: '401', isHideTab: true }
   },
   {
+    path: '/exception/404',
+    name: 'Exception404',
+    component: () => import('@views/exception/404.vue'),
+    meta: { title: '404', isHideTab: true }
+  },
+  {
+    path: '/exception/500',
+    name: 'Exception500',
+    component: () => import('@views/exception/500.vue'),
+    meta: { title: '500', isHideTab: true }
+  },
+  {
     path: '/outside',
     component: () => import('@views/index/index.vue'),
     name: 'Outside',
@@ -56,5 +68,13 @@ export const staticRoutes: AppRouteRecordRaw[] = [
         meta: { title: 'iframe' }
       }
     ]
+  },
+  // catch-all: prevents "[Vue Router warn]: No match found" during dynamic route loading.
+  // Must be last; excluded from isStaticRoute and login checks.
+  {
+    path: '/:pathMatch(.*)*',
+    name: 'NotFound',
+    component: () => import('@views/exception/404.vue'),
+    meta: { title: '404', isHideTab: true }
   }
 ]

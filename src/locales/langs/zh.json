@@ -236,7 +236,8 @@
     },
     "safeguard": {
       "title": "运维管理",
-      "audit": "操作审计"
+      "audit": "操作审计",
+      "agent": "Agent"
     },
     "plan": {
       "title": "版本计划",

@@ -31,7 +31,7 @@
               ref="stepBasicRef"
               :form="form"
               :read-only="isReadOnlyMode"
-              :lock-immutable-fields="lockImmutableFields"
+              :lock-immutable-fields="false"
               @update:form="form = $event"
             />
           </ElTabPane>
@@ -40,7 +40,7 @@
               ref="stepClusterConfigRef"
               :form="form"
               :read-only="isReadOnlyMode"
-              :lock-immutable-fields="lockImmutableFields"
+              :lock-immutable-fields="false"
               @update:form="form = $event"
             />
           </ElTabPane>
@@ -218,8 +218,14 @@
       const rv = planMeta.resourceVersion ?? detail.resource_version
       currentResourceVersion.value = rv == null ? null : Number(rv)
       const osImage = cfg.os_image ?? ''
-      const highAvailability = Boolean((cfg.kubernetes as any)?.high_availability)
-      const apiServerPortRaw = Number((cfg.network as any)?.api_server_port ?? (highAvailability ? 8443 : 6443))
+      const highAvailability = Boolean(
+        (cfg.kubernetes as any)?.high_availability ?? (cfg.kubernetes as any)?.enable_ha
+      )
+      const apiServerPortRaw = Number(
+        (cfg.network as any)?.api_server_port ??
+          (cfg.kubernetes as any)?.api_port ??
+          (highAvailability ? 8443 : 6443)
+      )
       const apiServerPort = Number.isFinite(apiServerPortRaw) ? apiServerPortRaw : highAvailability ? 8443 : 6443
       form.value = {
         name: detail.name ?? '',
@@ -234,7 +240,9 @@
         serviceNetwork: cfg.network?.service_network ?? '10.254.0.0/16',
         highAvailability,
         selfLoadBalance: highAvailability && Boolean((cfg.network as any)?.self_load_balance),
-        apiServerAddress: String((cfg.network as any)?.api_server_address ?? ''),
+        apiServerAddress: String(
+          (cfg.network as any)?.api_server_address ?? (cfg.kubernetes as any)?.api_server ?? ''
+        ),
         apiServerPort,
         kubeProxyMode: 'iptables',
         nodes: (detail.nodes ?? []).map(mapNodeFromApi),
@@ -297,6 +305,30 @@
     })
   }
 
+  function getErrorMessage(error: unknown, fallback: string): string {
+    if (error instanceof Error && error.message) return error.message
+    const maybe = error as {
+      message?: string
+      response?: { data?: { message?: string } | string }
+    }
+    const data = maybe?.response?.data
+    if (typeof data === 'string') {
+      try {
+        const parsed = JSON.parse(data) as { message?: string }
+        if (parsed?.message) return parsed.message
+      } catch {
+        // ignore parse failures
+      }
+      return data || fallback
+    }
+    if (data && typeof data === 'object' && 'message' in data) {
+      const msg = (data as { message?: string }).message
+      if (msg) return msg
+    }
+    if (maybe?.message) return maybe.message
+    return fallback
+  }
+
   async function startCurrentPlan() {
     if (!currentPlanId.value) return
     try {
@@ -308,7 +340,10 @@
       await fetchStartPlan(currentPlanId.value)
       ElMessage.success(`计划 "${form.value.name || '-'}" 启动成功`)
       await loadPlanDetail(currentPlanId.value)
-    } catch {}
+    } catch (e: unknown) {
+      if (e === 'cancel' || e === 'close') return
+      ElMessage.error(getErrorMessage(e, '启动失败'))
+    }
   }
 
   function buildPlanPayload() {
@@ -331,7 +366,12 @@
         os_image: f.osImage,
         kubernetes: {
           kubernetes_version: f.kubernetesVersion,
-          high_availability: f.highAvailability
+          // Backward-compatible: keep both old/new keys.
+          high_availability: f.highAvailability,
+          enable_ha: f.highAvailability,
+          api_server: f.apiServerAddress || '',
+          api_port: String(f.apiServerPort || 6443),
+          enable_public_ip: Boolean(f.apiServerAddress)
         },
         network: {
           network_interface: f.networkInterface,
@@ -341,7 +381,9 @@
           api_server_address: f.apiServerAddress || undefined,
           api_server_port: f.apiServerPort,
           self_load_balance: f.selfLoadBalance,
-          kube_proxy_mode: f.kubeProxyMode
+          // Backward-compatible: keep both old/new keys.
+          kube_proxy_mode: 'iptables',
+          kube_proxy: 'iptables'
         },
         runtime: { runtime: f.runtime },
         component: {

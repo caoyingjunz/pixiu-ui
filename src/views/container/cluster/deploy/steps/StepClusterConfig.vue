@@ -10,7 +10,7 @@
     <ElFormItem label="高可用 Kubernetes" prop="highAvailability">
       <ElSwitch
         :model-value="form.highAvailability"
-        :disabled="readOnly || lockImmutableFields"
+        :disabled="readOnly"
         @update:model-value="onHighAvailabilityChange"
       />
       <div class="form-tip form-tip--block">
@@ -31,7 +31,7 @@
       <ElInput
         :model-value="form.apiServerAddress"
         placeholder="kubernetes apiserver 的地址，非高可用可不填"
-        :disabled="readOnly || lockImmutableFields"
+        :disabled="readOnly"
         @update:model-value="emit('update:form', { ...form, apiServerAddress: $event })"
       />
       <div class="form-tip form-tip--block"
@@ -46,7 +46,7 @@
         :min="1"
         :max="65535"
         :precision="0"
-        :disabled="readOnly || lockImmutableFields"
+        :disabled="readOnly"
         controls-position="right"
         @update:model-value="
           emit('update:form', { ...form, apiServerPort: Number($event || 6443) })
@@ -136,7 +136,7 @@
   }
 
   function onHighAvailabilityChange(enabled: boolean | string | number) {
-    if (readOnly.value || lockImmutableFields.value) return
+    if (readOnly.value) return
     const highAvailability = Boolean(enabled)
     emit('update:form', {
       ...props.form,
