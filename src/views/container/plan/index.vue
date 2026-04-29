@@ -133,7 +133,7 @@
     <ElDrawer
       v-model="logDialogVisible"
       :title="`日志查询 — ${logTask?.name || ''}`"
-      size="40%"
+      size="48%"
       destroy-on-close
       class="task-log-drawer"
       @close="stopLogStream"
