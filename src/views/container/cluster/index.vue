@@ -634,6 +634,30 @@
     resetSearchParams()
   }
 
+  function getErrorMessage(error: unknown, fallback: string): string {
+    if (error instanceof Error && error.message) return error.message
+    const maybe = error as {
+      message?: string
+      response?: { data?: { message?: string } | string }
+    }
+    const data = maybe?.response?.data
+    if (typeof data === 'string') {
+      try {
+        const parsed = JSON.parse(data) as { message?: string }
+        if (parsed?.message) return parsed.message
+      } catch {
+        // ignore JSON parse error
+      }
+      return data || fallback
+    }
+    if (data && typeof data === 'object' && 'message' in data) {
+      const msg = (data as { message?: string }).message
+      if (msg) return msg
+    }
+    if (maybe?.message) return maybe.message
+    return fallback
+  }
+
   async function deleteCluster(row: ClusterItem) {
     try {
       await ElMessageBox.confirm(`确定要删除集群 "${row.clusterName}" 吗？`, '删除集群', {
@@ -644,7 +668,10 @@
       await fetchDeleteCluster(row.id)
       ElMessage.success('删除成功')
       refreshData()
-    } catch {}
+    } catch (e: unknown) {
+      if (e === 'cancel') return
+      ElMessage.error(getErrorMessage(e, '删除失败'))
+    }
   }
 
   function handleSelectionChange(rows: ClusterItem[]) {

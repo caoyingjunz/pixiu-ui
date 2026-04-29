@@ -53,7 +53,7 @@
     <ElDrawer
       v-model="taskDrawerVisible"
       title="部署进度"
-      size="52%"
+      size="60%"
       :destroy-on-close="true"
       class="plan-task-drawer"
       @open="handleTaskDrawerOpen"
@@ -80,7 +80,11 @@
           <ElTableColumn label="状态" width="130">
             <template #default="{ row }">
               <div class="task-status">
-                <ElIcon v-if="row.status === '运行中'" class="is-loading" color="var(--el-color-primary)">
+                <ElIcon
+                  v-if="row.status === '运行中'"
+                  class="is-loading"
+                  color="var(--el-color-primary)"
+                >
                   <Loading />
                 </ElIcon>
                 <ElIcon v-else-if="row.status === '已成功'" color="var(--el-color-success)">
@@ -101,7 +105,11 @@
           </ElTableColumn>
           <ElTableColumn label="结束时间" prop="gmt_modified" min-width="160">
             <template #default="{ row }">
-              {{ row.status === '运行中' || row.status === '未开始' ? '-' : formatDate(row.gmt_modified) }}
+              {{
+                row.status === '运行中' || row.status === '未开始'
+                  ? '-'
+                  : formatDate(row.gmt_modified)
+              }}
             </template>
           </ElTableColumn>
           <ElTableColumn label="操作" width="88" fixed="right" align="center">
@@ -118,6 +126,22 @@
           </ElTableColumn>
         </ElTable>
         <div v-if="tasks.length === 0 && !tasksLoading" class="task-empty">暂无部署任务</div>
+      </div>
+    </ElDrawer>
+
+    <!-- 日志流抽屉 -->
+    <ElDrawer
+      v-model="logDialogVisible"
+      :title="`日志查询 — ${logTask?.name || ''}`"
+      size="60%"
+      destroy-on-close
+      class="task-log-drawer"
+      @close="stopLogStream"
+    >
+      <div ref="logPanelRef" class="log-panel">
+        <pre v-for="(line, i) in logLines" :key="i" class="log-line">{{ line }}</pre>
+        <div v-if="logLines.length === 0 && !logStreaming" class="log-empty">暂无日志</div>
+        <div v-if="logStreaming" class="log-cursor">▌</div>
       </div>
     </ElDrawer>
   </div>
@@ -172,11 +196,87 @@
 
   function onTaskLogClick(row: PlanTask) {
     if (isTaskLogDisabled(row)) return
-    const text = row.message?.trim() ? row.message : '暂无日志'
-    ElMessageBox.alert(text, '任务日志', {
-      confirmButtonText: '确定',
-      customClass: 'task-log-dialog'
-    })
+    logTask.value = row
+    logLines.value = []
+    logDialogVisible.value = true
+    void startLogStream(currentPlan.value!.id, row.id)
+  }
+
+  // ---- 日志流 ----
+  const logDialogVisible = ref(false)
+  const logTask = ref<PlanTask | null>(null)
+  const logLines = ref<string[]>([])
+  const logStreaming = ref(false)
+  const logAbortController = ref<AbortController | null>(null)
+  const logPanelRef = ref<HTMLElement | null>(null)
+
+  function scrollLogToBottom() {
+    if (logPanelRef.value) {
+      logPanelRef.value.scrollTop = logPanelRef.value.scrollHeight
+    }
+  }
+
+  async function startLogStream(planId: number, taskId: number) {
+    const token = localStorage.getItem('pixiu-access-token') || ''
+    const ctrl = new AbortController()
+    logAbortController.value = ctrl
+    logStreaming.value = true
+    try {
+      const res = await fetch(`/pixiu/plans/${planId}/tasks/${taskId}/logs`, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: ctrl.signal
+      })
+      if (!res.ok || !res.body) {
+        logLines.value.push(`[错误] HTTP ${res.status}`)
+        return
+      }
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buf = ''
+      let firstChunk = true
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += decoder.decode(value, { stream: true })
+        // 首块：检查是否为业务错误 JSON（含 No such container）
+        if (firstChunk) {
+          firstChunk = false
+          try {
+            const parsed = JSON.parse(buf.trim())
+            if (parsed?.code !== 200 && String(parsed?.message).includes('No such container')) {
+              const fallback = logTask.value?.message?.trim()
+              logLines.value.push(fallback || '暂无日志')
+              return
+            }
+          } catch {
+            /* 不是 JSON，正常流式日志 */
+          }
+        }
+        const parts = buf.split('\n')
+        buf = parts.pop() ?? ''
+        for (const line of parts) {
+          logLines.value.push(line)
+        }
+        await nextTick()
+        scrollLogToBottom()
+      }
+      if (buf) logLines.value.push(buf)
+    } catch (e: any) {
+      if (e?.name !== 'AbortError') {
+        logLines.value.push(`[错误] ${e?.message || '连接断开'}`)
+      }
+    } finally {
+      logStreaming.value = false
+      logAbortController.value = null
+      await nextTick()
+      scrollLogToBottom()
+    }
+  }
+
+  function stopLogStream() {
+    logAbortController.value?.abort()
+    logAbortController.value = null
+    logStreaming.value = false
   }
 
   // 搜索
@@ -241,7 +341,8 @@
                 'span',
                 {
                   class: 'plan-icon-action',
-                  style: 'cursor:pointer;color:var(--el-text-color-secondary);display:inline-flex;align-items:center',
+                  style:
+                    'cursor:pointer;color:var(--el-text-color-secondary);display:inline-flex;align-items:center',
                   title: '复制名称',
                   onClick: (e: MouseEvent) => {
                     e.stopPropagation()
@@ -259,10 +360,10 @@
           width: 100,
           formatter: (row: PlanItemFormatted) => {
             const map: Record<string, { type: 'info' | 'primary' | 'success' | 'danger' }> = {
-              '未开始': { type: 'info' },
-              '运行中': { type: 'primary' },
-              '已成功': { type: 'success' },
-              '已失败': { type: 'danger' }
+              未开始: { type: 'info' },
+              运行中: { type: 'primary' },
+              已成功: { type: 'success' },
+              已失败: { type: 'danger' }
             }
             const cfg = map[row.step] ?? { type: 'info' as const }
             return h(ElTag, { type: cfg.type }, () => row.step)
@@ -297,7 +398,11 @@
           minWidth: 200,
           showOverflowTooltip: true,
           formatter: (row: PlanItemFormatted) =>
-            h('span', { style: 'font-size:12px;color:var(--el-text-color-secondary)' }, row.description || '-')
+            h(
+              'span',
+              { style: 'font-size:12px;color:var(--el-text-color-secondary)' },
+              row.description || '-'
+            )
         },
         {
           prop: 'operation',
@@ -358,7 +463,8 @@
   // 前端过滤
   const filteredData = computed(() => {
     return data.value.filter((item) => {
-      const nameMatch = !appliedSearch.value || item.name.toLowerCase().includes(appliedSearch.value.toLowerCase())
+      const nameMatch =
+        !appliedSearch.value || item.name.toLowerCase().includes(appliedSearch.value.toLowerCase())
       const statusMatch = !appliedStatus.value || item.step === appliedStatus.value
       return nameMatch && statusMatch
     })
@@ -407,10 +513,16 @@
         cancelButtonText: '取消',
         type: 'warning'
       })
+    } catch {
+      return
+    }
+    try {
       await fetchStartPlan(row.id)
       ElMessage.success(`计划 "${row.name}" 启动成功`)
       refreshData()
-    } catch {}
+    } catch (e: any) {
+      ElMessage.error(e?.message || '启动失败')
+    }
   }
 
   async function deletePlan(row: PlanItemFormatted) {
@@ -490,6 +602,7 @@
 
   onBeforeUnmount(() => {
     stopTaskPolling()
+    stopLogStream()
   })
 </script>
 
@@ -508,7 +621,6 @@
     font-size: 13px;
   }
 
-
   .destroy-plan-dialog .el-message-box__message {
     padding-top: 2px;
   }
@@ -518,6 +630,12 @@
     max-height: 60vh;
     overflow: auto;
     text-align: left;
+  }
+  .task-log-drawer .el-drawer__body {
+    padding: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
   }
 </style>
 
@@ -574,5 +692,42 @@
   .plan-task-drawer :deep(.el-drawer.rtl) {
     height: 82vh;
     margin-top: 9vh;
+  }
+
+  .log-panel {
+    background: #0d1117;
+    color: #c9d1d9;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    padding: 16px;
+    flex: 1;
+    overflow-y: auto;
+  }
+
+  .log-line {
+    margin: 0;
+    padding: 0;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  .log-empty {
+    color: #6e7681;
+    font-size: 13px;
+    text-align: center;
+    padding-top: 200px;
+  }
+
+  .log-cursor {
+    display: inline-block;
+    color: var(--el-color-primary);
+    animation: blink 1s step-end infinite;
+  }
+
+  @keyframes blink {
+    50% {
+      opacity: 0;
+    }
   }
 </style>

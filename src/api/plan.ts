@@ -71,6 +71,33 @@ export interface PlanTask {
   gmt_modified: string
 }
 
+function parseMessageFromPayload(payload: unknown): string {
+  if (!payload) return ''
+  if (typeof payload === 'string') {
+    try {
+      const parsed = JSON.parse(payload) as { message?: string }
+      return parsed?.message || payload
+    } catch {
+      return payload
+    }
+  }
+  if (typeof payload === 'object' && payload !== null) {
+    const obj = payload as { message?: unknown; error?: unknown }
+    if (typeof obj.message === 'string' && obj.message.trim()) return obj.message
+    if (typeof obj.error === 'string' && obj.error.trim()) return obj.error
+  }
+  return ''
+}
+
+function getApiErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) return error.message
+  if (!error || typeof error !== 'object') return fallback
+  const maybe = error as { message?: unknown; response?: { data?: unknown } }
+  if (typeof maybe.message === 'string' && maybe.message.trim()) return maybe.message
+  const parsed = parseMessageFromPayload(maybe.response?.data)
+  return parsed || fallback
+}
+
 /** 格式化 ISO 日期 */
 function formatDate(iso: string): string {
   if (!iso) return '-'
@@ -202,9 +229,16 @@ export async function fetchDeletePlan(id: number): Promise<void> {
  * 启动部署任务
  */
 export async function fetchStartPlan(id: number): Promise<void> {
-  const res = await pixiuAxios.post(`/pixiu/plans/${id}/start`)
-  const { code, message } = res.data
-  if (code !== 200) throw new Error(message || '启动失败')
+  try {
+    const res = await pixiuAxios.post(`/pixiu/plans/${id}/start`)
+    const code = Number(res?.data?.code)
+    if (code !== 200) {
+      const msg = parseMessageFromPayload(res?.data) || '启动失败'
+      throw new Error(msg)
+    }
+  } catch (error: unknown) {
+    throw new Error(getApiErrorMessage(error, '启动失败'))
+  }
 }
 
 /**

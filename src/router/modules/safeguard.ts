@@ -19,6 +19,16 @@ export const safeguardRoutes: AppRouteRecord = {
         icon: 'ri:shield-check-line',
         keepAlive: true
       }
+    },
+    {
+      path: 'agent',
+      name: 'SafeguardAgent',
+      component: '/safeguard/agent',
+      meta: {
+        title: 'menus.safeguard.agent',
+        icon: 'ri:robot-2-line',
+        keepAlive: true
+      }
     }
   ]
 }
