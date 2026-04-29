@@ -637,6 +637,10 @@
     display: flex;
     flex-direction: column;
   }
+
+  .task-log-drawer .el-drawer__header {
+    margin-bottom: 20px;
+  }
 </style>
 
 <style scoped>
@@ -700,7 +704,7 @@
     font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
     font-size: 12px;
     line-height: 1.6;
-    padding: 16px;
+    padding: 30px 16px 16px 20px;
     flex: 1;
     overflow-y: auto;
   }
