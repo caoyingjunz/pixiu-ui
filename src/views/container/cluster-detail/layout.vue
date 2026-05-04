@@ -584,7 +584,7 @@
   }
 
   .cluster-detail-sider {
-    width: 220px;
+    width: 180px;
     flex-shrink: 0;
     padding-right: 4px;
     border-right: 1px solid var(--el-border-color-lighter);

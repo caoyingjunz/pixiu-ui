@@ -611,7 +611,7 @@
     if (!cluster) return
     const command = await detectPodShell(cluster, opts.namespace, opts.pod, opts.container)
     if (!command) {
-      ElMessage.error('未探测到可用 shell（/bin/bash 或 /bin/sh）')
+      ElMessage.warning('未探测到可用 shell（/bin/bash 或 /bin/sh）')
       return
     }
     const isLocalHost =
@@ -668,14 +668,15 @@
       const token = localStorage.getItem('pixiu-access-token')
       const socket = token ? new WebSocket(wsUrl, [token]) : new WebSocket(wsUrl)
       let settled = false
-      let sawErrorText = false
+      let sawOutput = false
       const done = (ok: boolean) => {
         if (settled) return
         settled = true
         try { socket.close() } catch { /* ignore */ }
         resolve(ok)
       }
-      const timer = window.setTimeout(() => { done(!sawErrorText) }, 1200)
+      // 超时兜底：仍在连接中且未收到错误 → 认为 shell 可用
+      const timer = window.setTimeout(() => { done(true) }, 3000)
       socket.onopen = () => {
         try {
           socket.send('{"operation":"resize","cols":80,"rows":24}')
@@ -690,12 +691,17 @@
             return String(parsed.data ?? '')
           } catch { return raw }
         })()
-        if (/not found|No such file|executable file/i.test(text)) {
-          sawErrorText = true
+        // 检测到错误立即判定不可用，不等 onclose
+        if (/not found|no such file|executable file|unable to start|exec pod command failed/i.test(text)) {
+          window.clearTimeout(timer)
+          done(false)
+          return
         }
+        sawOutput = true
       }
       socket.onerror = () => { window.clearTimeout(timer); done(false) }
-      socket.onclose = () => { window.clearTimeout(timer); done(!sawErrorText) }
+      // onclose：收到过正常输出（shell 运行后 exit 退出）→ 可用；否则 → 不可用
+      socket.onclose = () => { window.clearTimeout(timer); done(sawOutput) }
     })
   }
 
