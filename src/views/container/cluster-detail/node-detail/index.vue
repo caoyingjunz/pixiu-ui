@@ -180,10 +180,34 @@
       @close="closeSshDrawer"
     >
       <template #header>
-        <span class="nd-ssh-drawer-title">节点远程登录 — <span class="nd-ssh-drawer-host">{{ sshForm.user }}@{{ sshForm.host }}:{{ sshForm.port }}</span></span>
-        <button class="nd-ssh-fullscreen-btn" :title="sshDrawerFullscreen ? '退出全屏' : '全屏'" @click.stop="sshDrawerFullscreen = !sshDrawerFullscreen">
-          <ArtSvgIcon :icon="sshDrawerFullscreen ? 'ri:fullscreen-exit-line' : 'ri:fullscreen-line'" style="width:16px;height:16px" />
-        </button>
+        <div class="nd-ssh-drawer-header-inner">
+          <span class="nd-ssh-drawer-title">
+            节点远程登录 —
+            <span class="nd-ssh-drawer-host">{{ sshForm.user }}@{{ sshForm.host }}:{{ sshForm.port }}</span>
+          </span>
+          <button
+            type="button"
+            class="el-drawer__close-btn nd-ssh-header-action-btn"
+            title="重新连接"
+            :disabled="sshConnecting"
+            @click.stop="reconnectSsh"
+          >
+            <ElIcon class="el-drawer__close">
+              <Refresh />
+            </ElIcon>
+          </button>
+          <button
+            type="button"
+            class="el-drawer__close-btn nd-ssh-header-action-btn"
+            :title="sshDrawerFullscreen ? '退出全屏' : '全屏'"
+            @click.stop="sshDrawerFullscreen = !sshDrawerFullscreen"
+          >
+            <ElIcon class="el-drawer__close">
+              <ScaleToOriginal v-if="sshDrawerFullscreen" />
+              <FullScreen v-else />
+            </ElIcon>
+          </button>
+        </div>
       </template>
       <div class="nd-ssh-terminal-wrap">
         <div
@@ -229,8 +253,8 @@
 </template>
 
 <script setup lang="ts">
-  import { ArrowLeft } from '@element-plus/icons-vue'
-  import { ElInput, ElMessage, ElMessageBox, ElTag } from 'element-plus'
+  import { ArrowLeft, FullScreen, Refresh, ScaleToOriginal } from '@element-plus/icons-vue'
+  import { ElIcon, ElInput, ElMessage, ElMessageBox, ElTag } from 'element-plus'
   import { computed, inject, nextTick, onMounted, onBeforeUnmount, ref } from 'vue'
   import { useRoute, useRouter } from 'vue-router'
   import YAML from 'js-yaml'
@@ -245,6 +269,7 @@
   } from '@/api/kubernetes/node'
   import { fetchNodeUsageMetrics } from '@/api/kubernetes/metrics'
   import { kubeProxyAxios } from '@/api/kubeProxy'
+  import { resolvePixiuWsOrigin } from '@/utils/pixiu-ws-origin'
   import {
     formatContainerRuntime,
     formatKubeletVersion,
@@ -655,15 +680,10 @@
   }
 
   function buildSshWsUrl(): string {
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const wsHost =
-      (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') &&
-      window.location.port !== '8080'
-        ? `${window.location.hostname}:8080`
-        : window.location.host
+    const base = resolvePixiuWsOrigin()
     const f = sshForm.value
     return (
-      `${wsProtocol}//${wsHost}/pixiu/kubeproxy/nodes/ws` +
+      `${base}/pixiu/kubeproxy/nodes/ws` +
       `?host=${encodeURIComponent(f.host)}` +
       `&port=${f.port || 22}` +
       `&user=${encodeURIComponent(f.user)}` +
@@ -705,9 +725,13 @@
     sshSocket.send(buf.buffer)
   }
 
-  function connectSsh() {
+  function connectSsh(options?: { keepLog?: boolean }) {
     closeSshSocket()
-    sshOutputLines.value = []
+    if (options?.keepLog) {
+      appendOutput('\r\n[正在重新连接...]\r\n')
+    } else {
+      sshOutputLines.value = []
+    }
     const url = buildSshWsUrl()
     const token = localStorage.getItem('pixiu-access-token')
     sshSocket = token ? new WebSocket(url, [token]) : new WebSocket(url)
@@ -748,6 +772,16 @@
       clearIdleTimer()
       appendOutput('\r\n[连接已断开]\r\n')
     }
+  }
+
+  function reconnectSsh() {
+    if (sshConnecting.value) return
+    if (!sshForm.value.host || !sshForm.value.user) {
+      ElMessage.warning('缺少主机或用户名，请关闭后重新填写')
+      return
+    }
+    sshConnecting.value = true
+    connectSsh({ keepLog: true })
   }
 
   async function confirmSshLogin() {
@@ -984,28 +1018,23 @@
   .nd-ssh-form {
     padding-top: 4px;
   }
+  .nd-ssh-drawer-header-inner {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    min-width: 0;
+    gap: 4px;
+  }
   .nd-ssh-drawer-title {
     font-size: 14px;
     font-weight: 500;
     flex: 1;
+    min-width: 0;
   }
-  .nd-ssh-fullscreen-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    border: none;
-    background: transparent;
-    color: var(--el-text-color-secondary);
-    cursor: pointer;
-    border-radius: 4px;
+  /* 与 ElDrawer 自带关闭按钮（.el-drawer__close-btn）同一套样式，仅保留与关闭键的间距 */
+  .nd-ssh-header-action-btn {
     flex-shrink: 0;
-    transition: color 0.15s, background-color 0.15s;
-  }
-  .nd-ssh-fullscreen-btn:hover {
-    color: var(--el-color-primary);
-    background-color: var(--el-color-primary-light-9);
+    margin-inline-end: 4px;
   }
   .nd-ssh-drawer-host {
     font-family: 'JetBrains Mono', Consolas, monospace;
