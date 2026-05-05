@@ -17,7 +17,7 @@
           <span class="nd-cluster-value">{{ clusterAlias }}</span>
         </div>
         <div class="nd-hd-actions">
-          <ElButton v-ripple @click="ElMessage.warning('暂不支持，敬请期待')">远程登录</ElButton>
+          <ElButton v-ripple @click="openSshLoginDialog">远程登录</ElButton>
           <ElButton v-ripple @click="yamlVisible = true">查看YAML</ElButton>
           <ArtButtonMore
             :list="[
@@ -140,6 +140,94 @@
       />
     </div>
 
+    <!-- SSH 登录凭证对话框 -->
+    <ElDialog v-model="sshLoginVisible" title="节点远程登录" width="440px" destroy-on-close @close="resetSshLogin">
+      <ElAlert
+        type="info"
+        :closable="false"
+        show-icon
+        class="nd-ssh-alert"
+        description="通过 SSH 连接到节点宿主机，执行命令操作。"
+      />
+      <ElForm :model="sshForm" label-width="80px" class="nd-ssh-form">
+        <ElFormItem label="主机地址">
+          <ElInput v-model="sshForm.host" placeholder="节点 IP" />
+        </ElFormItem>
+        <ElFormItem label="端口">
+          <ElInput v-model.number="sshForm.port" placeholder="22" type="number" />
+        </ElFormItem>
+        <ElFormItem label="用户名">
+          <ElInput v-model="sshForm.user" placeholder="root" />
+        </ElFormItem>
+        <ElFormItem label="密码">
+          <ElInput v-model="sshForm.password" type="password" show-password placeholder="请输入密码" />
+        </ElFormItem>
+      </ElForm>
+      <template #footer>
+        <ElButton @click="sshLoginVisible = false">取消</ElButton>
+        <ElButton type="primary" :loading="sshConnecting" @click="confirmSshLogin">连接</ElButton>
+      </template>
+    </ElDialog>
+
+    <!-- SSH 终端抽屉 -->
+    <ElDrawer
+      v-model="sshDrawerVisible"
+      title="节点远程登录"
+      direction="rtl"
+      :size="sshDrawerFullscreen ? '100%' : '60%'"
+      destroy-on-close
+      class="nd-ssh-drawer"
+      @close="closeSshDrawer"
+    >
+      <template #header>
+        <div class="nd-ssh-drawer-header-inner">
+          <span class="nd-ssh-drawer-title">
+            节点远程登录 —
+            <span class="nd-ssh-drawer-host">{{ sshForm.user }}@{{ sshForm.host }}:{{ sshForm.port }}</span>
+          </span>
+          <button
+            type="button"
+            class="el-drawer__close-btn nd-ssh-header-action-btn"
+            title="重新连接"
+            :disabled="sshConnecting"
+            @click.stop="reconnectSsh"
+          >
+            <ElIcon class="el-drawer__close">
+              <Refresh />
+            </ElIcon>
+          </button>
+          <button
+            type="button"
+            class="el-drawer__close-btn nd-ssh-header-action-btn"
+            :title="sshDrawerFullscreen ? '退出全屏' : '全屏'"
+            @click.stop="sshDrawerFullscreen = !sshDrawerFullscreen"
+          >
+            <ElIcon class="el-drawer__close">
+              <ScaleToOriginal v-if="sshDrawerFullscreen" />
+              <FullScreen v-else />
+            </ElIcon>
+          </button>
+        </div>
+      </template>
+      <div class="nd-ssh-terminal-wrap">
+        <div
+          ref="sshTermRef"
+          class="nd-ssh-terminal"
+          tabindex="0"
+          @keydown="onTermKeydown"
+          @click="focusTerm"
+        >
+          <span
+            v-for="(line, idx) in sshOutputLines"
+            :key="idx"
+            class="nd-ssh-line"
+            v-html="line"
+          />
+          <span class="nd-ssh-cursor" />
+        </div>
+      </div>
+    </ElDrawer>
+
     <ElDialog v-model="yamlVisible" title="查看 YAML" width="760px">
       <ElInput v-model="yamlText" type="textarea" :rows="24" readonly />
       <template #footer>
@@ -165,9 +253,9 @@
 </template>
 
 <script setup lang="ts">
-  import { ArrowLeft } from '@element-plus/icons-vue'
-  import { ElInput, ElMessage, ElMessageBox, ElTag } from 'element-plus'
-  import { computed, inject, onMounted, ref } from 'vue'
+  import { ArrowLeft, FullScreen, Refresh, ScaleToOriginal } from '@element-plus/icons-vue'
+  import { ElIcon, ElInput, ElMessage, ElMessageBox, ElTag } from 'element-plus'
+  import { computed, inject, nextTick, onMounted, onBeforeUnmount, ref } from 'vue'
   import { useRoute, useRouter } from 'vue-router'
   import YAML from 'js-yaml'
   import ArtButtonMore, { type ButtonMoreItem } from '@/components/core/forms/art-button-more/index.vue'
@@ -181,6 +269,7 @@
   } from '@/api/kubernetes/node'
   import { fetchNodeUsageMetrics } from '@/api/kubernetes/metrics'
   import { kubeProxyAxios } from '@/api/kubeProxy'
+  import { resolvePixiuWsOrigin } from '@/utils/pixiu-ws-origin'
   import {
     formatContainerRuntime,
     formatKubeletVersion,
@@ -540,6 +629,233 @@
     router.push({ path: '/container/nodes', query: { cluster: cluster.value } })
   }
 
+  // ========== SSH 远程登录 ==========
+  const sshLoginVisible = ref(false)
+  const sshDrawerVisible = ref(false)
+  const sshDrawerFullscreen = ref(false)
+  const sshConnecting = ref(false)
+  const sshTermRef = ref<HTMLElement | null>(null)
+  const sshOutputLines = ref<string[]>([])
+  let sshSocket: WebSocket | null = null
+  let sshIdleTimer: ReturnType<typeof setTimeout> | null = null
+  const SSH_IDLE_TIMEOUT = 10 * 60 * 1000 // 10 分钟无操作自动断开
+
+  const sshForm = ref({ host: '', port: 22, user: 'root', password: '' })
+
+  function openSshLoginDialog() {
+    const ip = node.value
+      ? (node.value.status?.addresses ?? []).find(
+          (a: { type: string; address: string }) => a.type === 'InternalIP'
+        )?.address ?? ''
+      : ''
+    sshForm.value = { host: ip, port: 22, user: 'root', password: '' }
+    sshLoginVisible.value = true
+  }
+
+  function resetSshLogin() {
+    sshConnecting.value = false
+  }
+
+  function escapeHtml(s: string): string {
+    return s
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+  }
+
+  function appendOutput(raw: string) {
+    // Split on newlines, keep \r for terminal compatibility
+    const parts = raw.split('\n')
+    if (sshOutputLines.value.length === 0) sshOutputLines.value.push('')
+    const last = sshOutputLines.value.length - 1
+    sshOutputLines.value[last] += escapeHtml(parts[0])
+    for (let i = 1; i < parts.length; i++) {
+      sshOutputLines.value.push(escapeHtml(parts[i]))
+    }
+    nextTick(() => {
+      if (sshTermRef.value) {
+        sshTermRef.value.scrollTop = sshTermRef.value.scrollHeight
+      }
+    })
+  }
+
+  function buildSshWsUrl(): string {
+    const base = resolvePixiuWsOrigin()
+    const f = sshForm.value
+    return (
+      `${base}/pixiu/kubeproxy/nodes/ws` +
+      `?host=${encodeURIComponent(f.host)}` +
+      `&port=${f.port || 22}` +
+      `&user=${encodeURIComponent(f.user)}` +
+      `&password=${encodeURIComponent(f.password)}`
+    )
+  }
+
+  function resetIdleTimer() {
+    if (sshIdleTimer) clearTimeout(sshIdleTimer)
+    sshIdleTimer = setTimeout(() => {
+      appendOutput('\r\n[连接因长时间无操作已自动断开]\r\n')
+      closeSshSocket()
+    }, SSH_IDLE_TIMEOUT)
+  }
+
+  function clearIdleTimer() {
+    if (sshIdleTimer) {
+      clearTimeout(sshIdleTimer)
+      sshIdleTimer = null
+    }
+  }
+
+  function sendSshData(text: string) {
+    if (!sshSocket || sshSocket.readyState !== WebSocket.OPEN) return
+    const encoded = btoa(unescape(encodeURIComponent(text)))
+    const msg = '1' + encoded
+    const buf = new Uint8Array(msg.length)
+    for (let i = 0; i < msg.length; i++) buf[i] = msg.charCodeAt(i)
+    sshSocket.send(buf.buffer)
+  }
+
+  function sendSshResize(cols: number, rows: number) {
+    if (!sshSocket || sshSocket.readyState !== WebSocket.OPEN) return
+    const json = JSON.stringify({ Columns: cols, Rows: rows })
+    const encoded = btoa(json)
+    const msg = '2' + encoded
+    const buf = new Uint8Array(msg.length)
+    for (let i = 0; i < msg.length; i++) buf[i] = msg.charCodeAt(i)
+    sshSocket.send(buf.buffer)
+  }
+
+  function connectSsh(options?: { keepLog?: boolean }) {
+    closeSshSocket()
+    if (options?.keepLog) {
+      appendOutput('\r\n[正在重新连接...]\r\n')
+    } else {
+      sshOutputLines.value = []
+    }
+    const url = buildSshWsUrl()
+    const token = localStorage.getItem('pixiu-access-token')
+    sshSocket = token ? new WebSocket(url, [token]) : new WebSocket(url)
+    sshSocket.binaryType = 'arraybuffer'
+
+    sshSocket.onopen = () => {
+      sshConnecting.value = false
+      resetIdleTimer()
+      nextTick(() => {
+        if (sshTermRef.value) {
+          const el = sshTermRef.value
+          const cols = Math.floor(el.clientWidth / 8) || 120
+          const rows = Math.floor(el.clientHeight / 18) || 30
+          sendSshResize(cols, rows)
+          el.focus()
+        }
+      })
+    }
+
+    sshSocket.onmessage = (event) => {
+      let text: string
+      if (event.data instanceof ArrayBuffer) {
+        text = new TextDecoder().decode(event.data)
+      } else {
+        text = String(event.data)
+      }
+      appendOutput(text)
+    }
+
+    sshSocket.onerror = () => {
+      sshConnecting.value = false
+      clearIdleTimer()
+      appendOutput('\r\n[连接出错，请检查主机地址、端口和凭证]\r\n')
+    }
+
+    sshSocket.onclose = () => {
+      sshConnecting.value = false
+      clearIdleTimer()
+      appendOutput('\r\n[连接已断开]\r\n')
+    }
+  }
+
+  function reconnectSsh() {
+    if (sshConnecting.value) return
+    if (!sshForm.value.host || !sshForm.value.user) {
+      ElMessage.warning('缺少主机或用户名，请关闭后重新填写')
+      return
+    }
+    sshConnecting.value = true
+    connectSsh({ keepLog: true })
+  }
+
+  async function confirmSshLogin() {
+    if (!sshForm.value.host) {
+      ElMessage.warning('请输入主机地址')
+      return
+    }
+    if (!sshForm.value.user) {
+      ElMessage.warning('请输入用户名')
+      return
+    }
+    sshConnecting.value = true
+    sshLoginVisible.value = false
+    sshDrawerVisible.value = true
+    await nextTick()
+    connectSsh()
+  }
+
+  function onTermKeydown(e: KeyboardEvent) {
+    e.preventDefault()
+    let seq = ''
+    if (e.key === 'Enter') {
+      seq = '\r'
+    } else if (e.key === 'Backspace') {
+      seq = '\x7f'
+    } else if (e.key === 'Tab') {
+      seq = '\t'
+    } else if (e.key === 'Escape') {
+      seq = '\x1b'
+    } else if (e.ctrlKey && e.key.length === 1) {
+      const code = e.key.toUpperCase().charCodeAt(0) - 64
+      if (code >= 1 && code <= 26) seq = String.fromCharCode(code)
+    } else if (e.key === 'ArrowUp') {
+      seq = '\x1b[A'
+    } else if (e.key === 'ArrowDown') {
+      seq = '\x1b[B'
+    } else if (e.key === 'ArrowRight') {
+      seq = '\x1b[C'
+    } else if (e.key === 'ArrowLeft') {
+      seq = '\x1b[D'
+    } else if (e.key.length === 1 && !e.metaKey) {
+      seq = e.key
+    }
+    if (seq) {
+      resetIdleTimer()
+      sendSshData(seq)
+    }
+  }
+
+  function focusTerm() {
+    sshTermRef.value?.focus()
+  }
+
+  function closeSshSocket() {
+    clearIdleTimer()
+    if (sshSocket) {
+      sshSocket.onclose = null
+      sshSocket.onerror = null
+      sshSocket.onmessage = null
+      sshSocket.close()
+      sshSocket = null
+    }
+  }
+
+  function closeSshDrawer() {
+    closeSshSocket()
+    sshOutputLines.value = []
+    sshDrawerFullscreen.value = false
+  }
+
+  onBeforeUnmount(() => {
+    closeSshSocket()
+  })
+
   onMounted(async () => {
     await loadNode()
     await loadMetrics()
@@ -695,5 +1011,94 @@
   }
   .nd-workloads-copy {
     margin-top: -8px;
+  }
+  .nd-ssh-alert {
+    margin-bottom: 16px;
+  }
+  .nd-ssh-form {
+    padding-top: 4px;
+  }
+  .nd-ssh-drawer-header-inner {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    min-width: 0;
+    gap: 4px;
+  }
+  .nd-ssh-drawer-title {
+    font-size: 14px;
+    font-weight: 500;
+    flex: 1;
+    min-width: 0;
+  }
+  /* 与 ElDrawer 自带关闭按钮（.el-drawer__close-btn）同一套样式，仅保留与关闭键的间距 */
+  .nd-ssh-header-action-btn {
+    flex-shrink: 0;
+    margin-inline-end: 4px;
+  }
+  .nd-ssh-drawer-host {
+    font-family: 'JetBrains Mono', Consolas, monospace;
+    font-size: 13px;
+    color: var(--el-color-primary);
+  }
+  .nd-ssh-terminal-wrap {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .nd-ssh-terminal {
+    flex: 1;
+    min-height: 0;
+    background: #1a1b26;
+    color: #c0caf5;
+    font-family: 'JetBrains Mono', 'Cascadia Code', Consolas, 'Courier New', monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    padding: 12px 16px;
+    border-radius: 6px;
+    overflow-y: auto;
+    overflow-x: auto;
+    white-space: pre;
+    outline: none;
+    cursor: text;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .nd-ssh-terminal:focus {
+    box-shadow: 0 0 0 2px var(--el-color-primary-light-5);
+  }
+  .nd-ssh-line {
+    display: block;
+    min-height: 1.6em;
+    white-space: pre;
+  }
+  .nd-ssh-cursor {
+    display: inline-block;
+    width: 8px;
+    height: 1.1em;
+    background: #c0caf5;
+    vertical-align: text-bottom;
+    animation: nd-blink 1s step-end infinite;
+  }
+  @keyframes nd-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0; }
+  }
+</style>
+
+<style>
+  .nd-ssh-drawer .el-drawer__header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 0;
+    padding-bottom: 12px;
+  }
+  .nd-ssh-drawer .el-drawer__body {
+    padding: 4px 16px 16px;
+    display: flex;
+    flex-direction: column;
   }
 </style>

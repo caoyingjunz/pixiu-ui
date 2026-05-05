@@ -428,6 +428,7 @@
       } else {
         await fetchCreatePlan(payload)
         ElMessage.success('部署集群创建成功')
+        router.push('/container/plan')
       }
     } catch (e: unknown) {
       const err = e as Error
@@ -455,7 +456,7 @@
     justify-content: space-between;
     gap: 8px;
     margin-bottom: 12px;
-    margin-left: -8px;
+    margin-left: calc(-1 * clamp(16px, 4vw, 48px));
   }
 
   .deploy-create-header__left {

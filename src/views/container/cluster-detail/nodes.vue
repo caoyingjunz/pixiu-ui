@@ -541,6 +541,24 @@
           }
         ]
 
+        const statusColumn: any = {
+          prop: 'status',
+          label: '状态',
+          width: 100,
+          formatter: (row: K8sNode) => {
+            const conditions = row.status?.conditions ?? []
+            const ready = conditions.find((c: any) => c.type === 'Ready')
+            const isReady = ready?.status === 'True'
+            const isUnschedulable = row.spec?.unschedulable
+            if (isUnschedulable) {
+              return h(ElTag, { type: 'warning', size: 'small' }, () => '禁止调度')
+            }
+            return isReady
+              ? h(ElTag, { type: 'success', size: 'small' }, () => '运行中')
+              : h(ElTag, { type: 'danger', size: 'small' }, () => '已停止')
+          }
+        }
+
         const compactColumns: any[] = [
           {
             prop: 'role',
@@ -643,7 +661,7 @@
           {
             prop: 'operation',
             label: '操作',
-            width: 160,
+            width: 180,
             fixed: 'right',
             formatter: (row: any) => {
               if (row._local) {
@@ -715,6 +733,7 @@
 
         return [
           ...baseColumns,
+          statusColumn,
           ...(hideExtraColumns.value ? compactColumns : extraColumns),
           ...tailColumns
         ]
